@@ -1,0 +1,219 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "FinanceFlow API Documentation",
+    "description": "API Docs cho Hệ thống Quản lý Tài chính Cá nhân & Dòng tiền Hàng tháng",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:5000/api/v1",
+      "description": "Local Development Server"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "UserProfile": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "email": { "type": "string", "format": "email" },
+          "nickname": { "type": "string" },
+          "avatar": { "type": "string" },
+          "baseCurrency": { "type": "string", "example": "VND" },
+          "salaryDay": { "type": "integer", "example": 5 },
+          "startOfWeek": { "type": "string", "example": "monday" }
+        }
+      },
+      "DashboardOverview": {
+        "type": "object",
+        "properties": {
+          "totalIncome": { "type": "number", "example": 25000000 },
+          "totalExpense": { "type": "number", "example": 14200000 },
+          "availableBalance": { "type": "number", "example": 10800000 },
+          "dailySafeSpendLimit": { "type": "number", "example": 350000 },
+          "budgetAlerts": {
+            "type": "array",
+            "items": { "type": "string" },
+            "example": ["Cảnh báo: Danh mục Ăn uống đã tiêu 85% hạn mức!"]
+          }
+        }
+      },
+      "TransactionInput": {
+        "type": "object",
+        "required": ["walletId", "amount", "type", "transactionDate"],
+        "properties": {
+          "walletId": { "type": "string" },
+          "categoryId": { "type": "string" },
+          "amount": { "type": "number", "example": 120000 },
+          "type": { "type": "string", "enum": ["expense", "income", "transfer"] },
+          "transactionDate": { "type": "string", "format": "date-time" },
+          "note": { "type": "string", "example": "Cà phê sáng" }
+        }
+      },
+      "BudgetInput": {
+        "type": "object",
+        "required": ["categoryId", "limitAmount", "month"],
+        "properties": {
+          "categoryId": { "type": "string" },
+          "limitAmount": { "type": "number", "example": 3000000 },
+          "month": { "type": "string", "example": "2026-10" }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/auth/register": {
+      "post": {
+        "summary": "Đăng ký tài khoản người dùng mới",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "password", "nickname"],
+                "properties": {
+                  "email": { "type": "string" },
+                  "password": { "type": "string" },
+                  "nickname": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Tạo tài khoản thành công" }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "summary": "Đăng nhập hệ thống",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "password"],
+                "properties": {
+                  "email": { "type": "string" },
+                  "password": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Đăng nhập thành công, trả về JWT Token" }
+        }
+      }
+    },
+    "/dashboard/overview": {
+      "get": {
+        "summary": "Lấy tổng quan tài chính (Tiền vào, Tiền ra, Số dư, Hạn mức an toàn ngày)",
+        "responses": {
+          "200": {
+            "description": "Dữ liệu dashboard",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DashboardOverview" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/spending-ranking": {
+      "get": {
+        "summary": "Bảng xếp hạng các hóa đơn/khoản chi có giá trị lớn nhất từ cao xuống thấp",
+        "responses": {
+          "200": { "description": "Danh sách xếp hạng chi tiêu" }
+        }
+      }
+    },
+    "/wallets": {
+      "get": {
+        "summary": "Danh sách ví & tài khoản tài chính",
+        "responses": { "200": { "description": "Thành công" } }
+      },
+      "post": {
+        "summary": "Thêm ví / tài khoản mới (tiền mặt, ngân hàng, thẻ tín dụng)",
+        "responses": { "201": { "description": "Tạo ví thành công" } }
+      }
+    },
+    "/wallets/net-worth": {
+      "get": {
+        "summary": "Báo cáo Tài sản ròng (Tổng tài sản - Nợ)",
+        "responses": { "200": { "description": "Thành công" } }
+      }
+    },
+    "/categories": {
+      "get": {
+        "summary": "Danh sách danh mục thu & chi",
+        "responses": { "200": { "description": "Thành công" } }
+      }
+    },
+    "/transactions": {
+      "get": {
+        "summary": "Danh sách lịch sử giao dịch thu / chi",
+        "parameters": [
+          { "name": "month", "in": "query", "schema": { "type": "string" } },
+          { "name": "categoryId", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Thành công" } }
+      },
+      "post": {
+        "summary": "Thêm mới giao dịch thu chi",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/TransactionInput" }
+            }
+          }
+        },
+        "responses": { "201": { "description": "Ghi nhận giao dịch thành công" } }
+      }
+    },
+    "/budgets": {
+      "get": {
+        "summary": "Danh sách ngân sách tháng và tiến độ đã chi tiêu",
+        "responses": { "200": { "description": "Thành công" } }
+      },
+      "post": {
+        "summary": "Lập hạn mức ngân sách cho danh mục",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/BudgetInput" }
+            }
+          }
+        },
+        "responses": { "201": { "description": "Thiết lập ngân sách thành công" } }
+      }
+    },
+    "/analytics/category-chart": {
+      "get": {
+        "summary": "Dữ liệu biểu đồ phân bổ chi tiêu theo danh mục",
+        "responses": { "200": { "description": "Thành công" } }
+      }
+    }
+  }
+}

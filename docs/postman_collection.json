@@ -1,0 +1,162 @@
+{
+  "info": {
+    "name": "FinanceFlow API Collection",
+    "description": "Bộ API Collection cho App Quản lý tài chính cá nhân FinanceFlow",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000/api/v1",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "YOUR_JWT_TOKEN",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "1. Authentication",
+      "item": [
+        {
+          "name": "Đăng ký tài khoản",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "url": { "raw": "{{baseUrl}}/auth/register" },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@financeflow.vn\",\n  \"password\": \"Password123@\",\n  \"nickname\": \"Hoàng Nam\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "Đăng nhập",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "url": { "raw": "{{baseUrl}}/auth/login" },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@financeflow.vn\",\n  \"password\": \"Password123@\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Dashboard & Tổng quan",
+      "item": [
+        {
+          "name": "Lấy tổng quan tài chính (Thu, Chi, Số dư, Hạn mức an toàn ngày)",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/dashboard/overview" }
+          }
+        },
+        {
+          "name": "Bảng xếp hạng khoản chi ngốn tiền nhất",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/dashboard/spending-ranking" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Quản lý Ví & Tài sản ròng",
+      "item": [
+        {
+          "name": "Danh sách ví / tài khoản",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/wallets" }
+          }
+        },
+        {
+          "name": "Thêm ví mới",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{baseUrl}}/wallets" },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Techcombank Visa\",\n  \"type\": \"bank\",\n  \"balance\": 12000000,\n  \"currency\": \"VND\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "Xem Tài sản ròng (Tài sản vs Nợ)",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/wallets/net-worth" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Giao dịch Thu / Chi",
+      "item": [
+        {
+          "name": "Lấy lịch sử giao dịch",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/transactions?month=2026-10"
+            }
+          }
+        },
+        {
+          "name": "Thêm giao dịch chi tiêu mới",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{baseUrl}}/transactions" },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"walletId\": \"660000000000000000000010\",\n  \"categoryId\": \"660000000000000000000020\",\n  \"amount\": 85000,\n  \"type\": \"expense\",\n  \"transactionDate\": \"2026-10-01T12:00:00Z\",\n  \"note\": \"Cơm trưa văn phòng\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Quản lý Ngân sách (Budgeting)",
+      "item": [
+        {
+          "name": "Danh sách ngân sách tháng & % đã tiêu",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/budgets?month=2026-10" }
+          }
+        },
+        {
+          "name": "Tạo hạn mức ngân sách mới",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{baseUrl}}/budgets" },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"categoryId\": \"660000000000000000000020\",\n  \"limitAmount\": 3000000,\n  \"month\": \"2026-10\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
