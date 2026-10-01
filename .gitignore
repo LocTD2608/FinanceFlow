@@ -1,0 +1,57 @@
+# Thư viện phụ thuộc
+node_modules/
+.pnp
+.pnp.js
+
+# Kiểm thử & độ bao phủ code
+coverage/
+
+# Expo build & cache
+.expo/
+dist/
+web-build/
+
+# Mã nguồn native (Android / iOS)
+*.orig.*
+android/
+ios/
+
+# Biến môi trường
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# File cài đặt & file nhị phân dung lượng lớn
+*.exe
+*.zip
+*.tar.gz
+*.dmg
+
+# Hệ điều hành & Trình soạn thảo (IDE)
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Nhật ký lỗi npm / yarn / pnpm
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Trợ lý AI & Kỹ năng (Chỉ lưu trên máy tính, không đẩy lên Git)
+.agents/
+.agent/
+.gemini/
+.impeccable/
+GEMINI.md
+AGENTS.md
+CLAUDE.md
+PRODUCT.md
+DESIGN.md
