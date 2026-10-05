@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken');
 
 const connectDB = require('./config/db');
 const User = require('./models/User');
+const categoryRoutes = require('./routes/category.routes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -93,6 +94,9 @@ app.get('/api/auth/me', (req, res) => {
     return res.status(401).json({ success: false, message: 'Token không hợp lệ hoặc đã hết hạn.' });
   }
 });
+
+// 4. Quản lý danh mục (CRUD, yêu cầu đăng nhập)
+app.use('/api/categories', categoryRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

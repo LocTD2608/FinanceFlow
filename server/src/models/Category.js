@@ -30,6 +30,15 @@ const categorySchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    // Soft delete: danh mục bị xóa mềm sẽ không hiển thị nhưng vẫn giữ trong DB
+    isDeleted: {
+      type: Boolean,
+      default: false,
+    },
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,
