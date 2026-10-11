@@ -8,6 +8,7 @@ const connectDB = require('./config/db');
 const User = require('./models/User');
 const categoryRoutes = require('./routes/category.routes');
 const dashboardRoutes = require('./routes/dashboard.routes');
+const transactionRoutes = require('./routes/transaction.routes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -101,6 +102,9 @@ app.use('/api/categories', categoryRoutes);
 
 // 5. Thống kê Dashboard (tổng thu/chi, số dư, biểu đồ theo danh mục)
 app.use('/api/dashboard', dashboardRoutes);
+
+// 6. Giao dịch thu/chi (yêu cầu đăng nhập)
+app.use('/api/transactions', transactionRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
