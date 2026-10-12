@@ -15,7 +15,9 @@ const transactionSchema = new mongoose.Schema(
     categoryId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Category',
-      required: true,
+      required: function () {
+        return this.type !== 'transfer';
+      },
     },
     // Chỉ có giá trị khi type === 'transfer'
     destinationWalletId: {

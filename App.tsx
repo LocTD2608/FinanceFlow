@@ -6,7 +6,7 @@ import WelcomeScreen from './src/screens/auth/WelcomeScreen';
 import LoginScreen from './src/screens/auth/LoginScreen';
 import RegisterScreen from './src/screens/auth/RegisterScreen';
 import SuccessScreen from './src/screens/auth/SuccessScreen';
-import HomeScreen from './src/screens/dashboard/HomeScreen';
+import FinancialCenterScreen from './src/screens/dashboard/FinancialCenterScreen';
 
 type ScreenType = 'welcome' | 'login' | 'register' | 'success' | 'home';
 
@@ -21,11 +21,8 @@ export default function App() {
 
   useEffect(() => {
     if (!isLoading) {
-      if (user) {
-        setCurrentScreen('home');
-      } else {
-        setCurrentScreen('welcome');
-      }
+      // Cho phép vào thẳng màn hình Trung tâm tài chính chuẩn mockup
+      setCurrentScreen('home');
     }
   }, [isLoading, user]);
 
@@ -78,7 +75,7 @@ export default function App() {
       )}
 
       {currentScreen === 'home' && (
-        <HomeScreen onLogout={() => setCurrentScreen('welcome')} />
+        <FinancialCenterScreen />
       )}
     </View>
   );

@@ -7,6 +7,7 @@ const jwt = require('jsonwebtoken');
 const connectDB = require('./config/db');
 const User = require('./models/User');
 const categoryRoutes = require('./routes/category.routes');
+const transactionRoutes = require('./routes/transaction.routes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -97,6 +98,9 @@ app.get('/api/auth/me', (req, res) => {
 
 // 4. Quản lý danh mục (CRUD, yêu cầu đăng nhập)
 app.use('/api/categories', categoryRoutes);
+
+// 5. Quản lý giao dịch thu / chi / chuyển khoản & số dư ví
+app.use('/api/transactions', transactionRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
