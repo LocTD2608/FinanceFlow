@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_BASE_URL as ROOT_API_URL } from './config';
 
 export interface User {
   id: string;
@@ -14,7 +15,7 @@ export interface AuthResponse {
   token?: string;
 }
 
-const API_BASE_URL = 'http://localhost:5000/api/auth';
+const API_BASE_URL = `${ROOT_API_URL}/auth`;
 const LOCAL_USERS_KEY = '@financeflow_local_users';
 
 export const authApi = {

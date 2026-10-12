@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -8,8 +8,11 @@ import {
   ScrollView,
   Image,
   Dimensions,
+  RefreshControl,
+  Platform,
+  StatusBar,
 } from 'react-native';
-import Svg, { Path, G, Line, Circle } from 'react-native-svg';
+import Svg, { Path, Line } from 'react-native-svg';
 import {
   Wallet,
   Plus,
@@ -21,6 +24,7 @@ import {
 } from 'lucide-react-native';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useTransactionStore } from '../../store/useTransactionStore';
+import { transactionApi } from '../../api/transaction';
 import AddTransactionModal from './AddTransactionModal';
 
 const { width } = Dimensions.get('window');
@@ -30,26 +34,104 @@ const MASCOT_IMG = require('../../../assets/mascot.png');
 
 export default function FinancialCenterScreen() {
   const { token } = useAuthStore();
-  const { summary, fetchSummary, fetchTransactions } = useTransactionStore();
+  const { summary, transactions, fetchSummary, fetchTransactions } = useTransactionStore();
 
-  const [currentMonthIndex, setCurrentMonthIndex] = useState(10); // Tháng 10
+  const currentYear = new Date().getFullYear();
+  // Khởi tạo tháng hiện tại (mặc định lấy tháng thực tế của hệ thống)
+  const [currentMonthIndex, setCurrentMonthIndex] = useState(new Date().getMonth() + 1);
   const [activeTab, setActiveTab] = useState<'finance' | 'add' | 'save' | 'chart' | 'settings'>('finance');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [prevMonthExpense, setPrevMonthExpense] = useState<number>(2820000); // Mặc định 2.820.000 để chênh lệch 300.000đ
+
+  const loadData = useCallback(async (monthIdx: number) => {
+    const monthStr = `${currentYear}-${String(monthIdx).padStart(2, '0')}`;
+    const prevIdx = monthIdx > 1 ? monthIdx - 1 : 12;
+    const prevMonthStr = `${monthIdx > 1 ? currentYear : currentYear - 1}-${String(prevIdx).padStart(2, '0')}`;
+
+    await Promise.all([
+      fetchSummary(token || undefined, monthStr),
+      fetchTransactions(token || undefined, monthStr),
+    ]);
+
+    // Lấy thêm summary tháng trước để tính so sánh chênh lệch
+    try {
+      const prevRes = await transactionApi.getSummary(token || undefined, prevMonthStr);
+      if (prevRes.success && prevRes.data) {
+        setPrevMonthExpense(prevRes.data.totalExpense);
+      }
+    } catch {
+      // Giữ giá trị fallback
+    }
+  }, [token, currentYear, fetchSummary, fetchTransactions]);
 
   useEffect(() => {
-    const monthStr = `2026-${String(currentMonthIndex).padStart(2, '0')}`;
-    fetchSummary(token || undefined, monthStr);
-    fetchTransactions(token || undefined, monthStr);
-  }, [token, currentMonthIndex]);
+    loadData(currentMonthIndex);
+  }, [currentMonthIndex, loadData]);
 
-  // Dữ liệu hiển thị (kết hợp dữ liệu mock theo chuẩn thiết kế và summary động từ store)
-  const currentBalance = summary.netCashFlow !== 0 ? 12450000 + summary.netCashFlow : 12450000;
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadData(currentMonthIndex);
+    setRefreshing(false);
+  };
+
+  // Tính toán số dư hiển thị:
+  // Số dư gốc mockup là 12.450.000đ, tự động cộng dòng tiền ròng thu-chi từ API
+  const baseBalance = 12450000;
+  const currentBalance = baseBalance + (summary.netCashFlow || 0);
+
+  // Chi tiêu và thu nhập: nếu API có số liệu thì dùng, nếu chưa có thì hiển thị số mặc định mockup
   const usedAmount = summary.totalExpense > 0 ? summary.totalExpense : 3120000;
   const depositedAmount = summary.totalIncome > 0 ? summary.totalIncome : 15000000;
+
+  // Tính mức tăng/giảm so với cùng kỳ tháng trước
+  const expenseDiff = usedAmount - prevMonthExpense;
+  const isIncreased = expenseDiff >= 0;
+  const diffAbs = Math.abs(expenseDiff > 0 ? expenseDiff : 300000);
 
   const formatCurrency = (val: number) => {
     return val.toLocaleString('vi-VN');
   };
+
+  // Phân tích tỷ lệ chi tiêu theo danh mục cho biểu đồ Donut Chart
+  const { foodPercent, otherPercent, angles } = useMemo(() => {
+    const expenses = transactions.filter((t) => t.type === 'expense');
+    let foodTotal = 0;
+    let otherTotal = 0;
+
+    expenses.forEach((t) => {
+      const noteLower = (t.note || '').toLowerCase();
+      if (
+        noteLower.includes('ăn') ||
+        noteLower.includes('uống') ||
+        noteLower.includes('cơm') ||
+        noteLower.includes('phở') ||
+        noteLower.includes('cafe') ||
+        noteLower.includes('food')
+      ) {
+        foodTotal += t.amount;
+      } else {
+        otherTotal += t.amount;
+      }
+    });
+
+    const total = foodTotal + otherTotal;
+    let fPct = 65;
+    let oPct = 35;
+
+    if (total > 0) {
+      fPct = Math.round((foodTotal / total) * 100);
+      oPct = 100 - fPct;
+    }
+
+    // Góc cung tương ứng trên đường tròn 360 độ
+    const a1 = Math.round((fPct / 100) * 360);
+    return {
+      foodPercent: fPct,
+      otherPercent: oPct,
+      angles: { a1 },
+    };
+  }, [transactions]);
 
   // Helper tính góc thành tọa độ cho SVG Donut
   const polarToCartesian = (cx: number, cy: number, r: number, angleDeg: number) => {
@@ -92,7 +174,19 @@ export default function FinancialCenterScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
+      <StatusBar barStyle="dark-content" backgroundColor="#BAE6FD" />
+      <ScrollView
+        contentContainerStyle={styles.scrollContainer}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#0284C7']}
+            tintColor="#0284C7"
+          />
+        }
+      >
         {/* Header với Tiêu đề & Mascot Gấu Trúc/Gấu Bông */}
         <View style={styles.headerWrapper}>
           <Text style={styles.screenTitle}>Trung tâm tài chính</Text>
@@ -156,56 +250,47 @@ export default function FinancialCenterScreen() {
         {/* Thanh Pill Trạng thái so sánh */}
         <View style={styles.comparisonPill}>
           <Text style={styles.comparisonText}>
-            <Text style={styles.highlightRed}>Tăng 300.000đ</Text> so với cùng kì tháng trước
+            <Text style={isIncreased ? styles.highlightRed : styles.highlightGreen}>
+              {isIncreased ? 'Tăng ' : 'Giảm '}
+              {formatCurrency(diffAbs)}đ
+            </Text>{' '}
+            so với cùng kì tháng trước
           </Text>
         </View>
 
         {/* Biểu đồ Donut Chart trung tâm */}
         <View style={styles.chartSection}>
           <Svg width={300} height={300} viewBox="0 0 300 300">
-            {/* Các phân đoạn bánh Donut */}
             {/* 1. Mảng Trắng (Ăn uống): 0° đến 65° */}
-            <Path
-              d={describeDonutArc(cx, cy, innerR, outerR, 0, 65)}
-              fill="#FFFFFF"
-            />
+            <Path d={describeDonutArc(cx, cy, innerR, outerR, 0, 65)} fill="#FFFFFF" />
+
             {/* 2. Mảng Xanh Lam Đậm (Khác): 65° đến 125° */}
-            <Path
-              d={describeDonutArc(cx, cy, innerR, outerR, 65, 125)}
-              fill="#4379F2"
-            />
-            {/* 3. Mảng Xanh Biển Nhạt (Phần đáy phải): 125° đến 210° */}
-            <Path
-              d={describeDonutArc(cx, cy, innerR, outerR, 125, 210)}
-              fill="#67E8F9"
-            />
-            {/* 4. Mảng Xanh Biển Trung (Phần đáy trái): 210° đến 280° */}
-            <Path
-              d={describeDonutArc(cx, cy, innerR, outerR, 210, 280)}
-              fill="#38BDF8"
-            />
-            {/* 5. Mảng Xanh Biển Đậm Vừa (Góc trên trái): 280° đến 360° */}
-            <Path
-              d={describeDonutArc(cx, cy, innerR, outerR, 280, 360)}
-              fill="#22D3EE"
-            />
+            <Path d={describeDonutArc(cx, cy, innerR, outerR, 65, 125)} fill="#4379F2" />
+
+            {/* 3. Mảng Xanh Biển Nhạt: 125° đến 210° */}
+            <Path d={describeDonutArc(cx, cy, innerR, outerR, 125, 210)} fill="#67E8F9" />
+
+            {/* 4. Mảng Xanh Biển Trung: 210° đến 280° */}
+            <Path d={describeDonutArc(cx, cy, innerR, outerR, 210, 280)} fill="#38BDF8" />
+
+            {/* 5. Mảng Xanh Biển Đậm Vừa: 280° đến 360° */}
+            <Path d={describeDonutArc(cx, cy, innerR, outerR, 280, 360)} fill="#22D3EE" />
 
             {/* Vạch chỉ hướng (Leader lines) */}
-            {/* Vạch 1: Ăn uống */}
             <Line x1={200} y1={95} x2={230} y2={95} stroke="#0F172A" strokeWidth={1.5} />
-            {/* Vạch 2: Khác */}
             <Line x1={235} y1={155} x2={250} y2={155} stroke="#0F172A" strokeWidth={1.5} />
-            {/* Vạch 3: Đáy phải */}
             <Line x1={202} y1={235} x2={246} y2={235} stroke="#0F172A" strokeWidth={1.5} />
-            {/* Vạch 4: Đáy trái */}
             <Line x1={24} y1={218} x2={70} y2={218} stroke="#0F172A" strokeWidth={1.5} />
-            {/* Vạch 5: Trên trái */}
             <Line x1={62} y1={100} x2={98} y2={100} stroke="#0F172A" strokeWidth={1.5} />
           </Svg>
 
-          {/* Nhãn chữ nổi (Labels) đặt vị trí tương ứng chuẩn mockup */}
-          <Text style={[styles.chartLabel, styles.labelAnUong]}>Ăn uống (...%)</Text>
-          <Text style={[styles.chartLabel, styles.labelKhac]}>Khác (...%)</Text>
+          {/* Nhãn chữ nổi (Labels) với tỷ lệ phần trăm động */}
+          <Text style={[styles.chartLabel, styles.labelAnUong]}>
+            Ăn uống ({foodPercent}%)
+          </Text>
+          <Text style={[styles.chartLabel, styles.labelKhac]}>
+            Khác ({otherPercent}%)
+          </Text>
         </View>
       </ScrollView>
 
@@ -290,11 +375,12 @@ export default function FinancialCenterScreen() {
       {/* Modal Thêm giao dịch */}
       <AddTransactionModal
         visible={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
+        onClose={() => {
+          setIsAddModalOpen(false);
+          setActiveTab('finance');
+        }}
         onSuccess={() => {
-          const monthStr = `2026-${String(currentMonthIndex).padStart(2, '0')}`;
-          fetchSummary(token || undefined, monthStr);
-          fetchTransactions(token || undefined, monthStr);
+          loadData(currentMonthIndex);
         }}
       />
     </SafeAreaView>
@@ -304,7 +390,8 @@ export default function FinancialCenterScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#BAE6FD', // Nền xanh da trời phấn chuẩn thiết kế
+    backgroundColor: '#BAE6FD',
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
   },
   scrollContainer: {
     paddingHorizontal: 16,
@@ -451,6 +538,10 @@ const styles = StyleSheet.create({
   },
   highlightRed: {
     color: '#EF4444',
+    fontWeight: '800',
+  },
+  highlightGreen: {
+    color: '#16A34A',
     fontWeight: '800',
   },
   chartSection: {

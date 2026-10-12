@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_BASE_URL as ROOT_API_URL } from './config';
 
 export type TransactionType = 'expense' | 'income' | 'transfer';
 
@@ -52,7 +53,7 @@ export interface CashFlowSummary {
   netCashFlow: number;
 }
 
-const API_BASE_URL = 'http://localhost:5000/api/transactions';
+const API_BASE_URL = `${ROOT_API_URL}/transactions`;
 const LOCAL_TX_KEY = '@financeflow_local_transactions';
 const LOCAL_WALLETS_KEY = '@financeflow_local_wallets';
 

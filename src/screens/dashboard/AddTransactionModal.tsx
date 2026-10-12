@@ -8,7 +8,13 @@ import {
   StyleSheet,
   Alert,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  TouchableWithoutFeedback,
+  Keyboard,
+  ScrollView,
 } from 'react-native';
+import { X, Check } from 'lucide-react-native';
 import { THEME } from '../../constants/theme';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useTransactionStore } from '../../store/useTransactionStore';
@@ -30,6 +36,7 @@ export default function AddTransactionModal({ visible, onClose, onSuccess }: Pro
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async () => {
+    Keyboard.dismiss();
     const amount = Number(amountStr.replace(/[^0-9]/g, ''));
     if (!amount || amount <= 0) {
       Alert.alert('Lỗi', 'Vui lòng nhập số tiền hợp lệ (> 0 đ).');
@@ -45,6 +52,7 @@ export default function AddTransactionModal({ visible, onClose, onSuccess }: Pro
         type,
         walletId: defaultWalletId,
         note: note.trim(),
+        transactionDate: new Date().toISOString(),
       });
 
       if (result.success) {
@@ -65,107 +73,155 @@ export default function AddTransactionModal({ visible, onClose, onSuccess }: Pro
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.overlay}>
-        <View style={styles.sheetContainer}>
-          <View style={styles.indicator} />
-          <Text style={styles.title}>Thêm Giao Dịch Mới</Text>
-          <Text style={styles.subtitle}>Tự động tính toán cộng / trừ số dư ví</Text>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.keyboardAvoidingView}
+      >
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <View style={styles.overlay}>
+            <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+              <View style={styles.sheetContainer}>
+                {/* Header thanh kéo & Nút đóng */}
+                <View style={styles.headerRow}>
+                  <View style={styles.headerSpacer} />
+                  <View style={styles.indicator} />
+                  <TouchableOpacity
+                    style={styles.closeBtn}
+                    onPress={onClose}
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  >
+                    <X size={20} color="#64748B" />
+                  </TouchableOpacity>
+                </View>
 
-          {/* Type Toggle: Chi tiêu vs Thu nhập */}
-          <View style={styles.typeRow}>
-            <TouchableOpacity
-              style={[
-                styles.typeBtn,
-                type === 'expense' && { backgroundColor: '#FEE2E2', borderColor: '#EF4444' },
-              ]}
-              onPress={() => setType('expense')}
-            >
-              <Text
-                style={[
-                  styles.typeBtnText,
-                  type === 'expense' && { color: '#DC2626', fontWeight: '700' },
-                ]}
-              >
-                💸 Tiền Ra (Chi)
-              </Text>
-            </TouchableOpacity>
+                <ScrollView
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={styles.scrollContent}
+                >
+                  <Text style={styles.title}>Thêm Giao Dịch Mới</Text>
+                  <Text style={styles.subtitle}>Tự động tính toán cộng / trừ số dư ví</Text>
 
-            <TouchableOpacity
-              style={[
-                styles.typeBtn,
-                type === 'income' && { backgroundColor: '#DCFCE7', borderColor: '#22C55E' },
-              ]}
-              onPress={() => setType('income')}
-            >
-              <Text
-                style={[
-                  styles.typeBtnText,
-                  type === 'income' && { color: '#16A34A', fontWeight: '700' },
-                ]}
-              >
-                💰 Tiền Vào (Thu)
-              </Text>
-            </TouchableOpacity>
+                  {/* Type Toggle: Chi tiêu vs Thu nhập */}
+                  <View style={styles.typeRow}>
+                    <TouchableOpacity
+                      style={[
+                        styles.typeBtn,
+                        type === 'expense' && { backgroundColor: '#FEE2E2', borderColor: '#EF4444' },
+                      ]}
+                      onPress={() => setType('expense')}
+                    >
+                      <Text
+                        style={[
+                          styles.typeBtnText,
+                          type === 'expense' && { color: '#DC2626', fontWeight: '700' },
+                        ]}
+                      >
+                        💸 Tiền Ra (Chi)
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.typeBtn,
+                        type === 'income' && { backgroundColor: '#DCFCE7', borderColor: '#22C55E' },
+                      ]}
+                      onPress={() => setType('income')}
+                    >
+                      <Text
+                        style={[
+                          styles.typeBtnText,
+                          type === 'income' && { color: '#16A34A', fontWeight: '700' },
+                        ]}
+                      >
+                        💰 Tiền Vào (Thu)
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Amount input & Toolbar Ẩn bàn phím */}
+                  <View style={styles.labelRow}>
+                    <Text style={styles.inputLabel}>Số tiền (VNĐ)</Text>
+                    <TouchableOpacity
+                      style={styles.hideKeyBtn}
+                      onPress={Keyboard.dismiss}
+                      activeOpacity={0.7}
+                    >
+                      <Check size={14} color="#0284C7" />
+                      <Text style={styles.hideKeyText}>Xong / Ẩn phím</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <TextInput
+                    style={styles.amountInput}
+                    keyboardType="number-pad"
+                    returnKeyType="done"
+                    onSubmitEditing={Keyboard.dismiss}
+                    placeholder="0 đ"
+                    placeholderTextColor="#94A3B8"
+                    value={amountStr}
+                    onChangeText={(t) => {
+                      const num = t.replace(/[^0-9]/g, '');
+                      if (!num) {
+                        setAmountStr('');
+                      } else {
+                        setAmountStr(Number(num).toLocaleString('vi-VN') + ' đ');
+                      }
+                    }}
+                  />
+
+                  {/* Note input */}
+                  <Text style={styles.inputLabel}>Ghi chú giao dịch</Text>
+                  <TextInput
+                    style={styles.textInput}
+                    placeholder="Ví dụ: Ăn trưa, Đổ xăng, Tiền lương..."
+                    placeholderTextColor="#94A3B8"
+                    value={note}
+                    onChangeText={setNote}
+                    returnKeyType="done"
+                    onSubmitEditing={Keyboard.dismiss}
+                  />
+
+                  {/* Action buttons */}
+                  <View style={styles.actionRow}>
+                    <TouchableOpacity style={styles.cancelBtn} onPress={onClose} disabled={isSubmitting}>
+                      <Text style={styles.cancelBtnText}>Hủy</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.submitBtn,
+                        { backgroundColor: type === 'expense' ? '#DC2626' : '#16A34A' },
+                      ]}
+                      onPress={handleSubmit}
+                      disabled={isSubmitting}
+                    >
+                      {isSubmitting ? (
+                        <ActivityIndicator color="#FFFFFF" />
+                      ) : (
+                        <Text style={styles.submitBtnText}>
+                          {type === 'expense' ? 'Ghi nhận Chi tiêu (-)' : 'Ghi nhận Thu nhập (+)'}
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </ScrollView>
+              </View>
+            </TouchableWithoutFeedback>
           </View>
-
-          {/* Amount input */}
-          <Text style={styles.inputLabel}>Số tiền (VNĐ)</Text>
-          <TextInput
-            style={styles.amountInput}
-            keyboardType="numeric"
-            placeholder="0 đ"
-            placeholderTextColor="#94A3B8"
-            value={amountStr}
-            onChangeText={(t) => {
-              const num = t.replace(/[^0-9]/g, '');
-              if (!num) {
-                setAmountStr('');
-              } else {
-                setAmountStr(Number(num).toLocaleString('vi-VN') + ' đ');
-              }
-            }}
-          />
-
-          {/* Note input */}
-          <Text style={styles.inputLabel}>Ghi chú giao dịch</Text>
-          <TextInput
-            style={styles.textInput}
-            placeholder="Ví dụ: Ăn trưa, Đổ xăng, Tiền lương..."
-            placeholderTextColor="#94A3B8"
-            value={note}
-            onChangeText={setNote}
-          />
-
-          {/* Action buttons */}
-          <View style={styles.actionRow}>
-            <TouchableOpacity style={styles.cancelBtn} onPress={onClose} disabled={isSubmitting}>
-              <Text style={styles.cancelBtnText}>Hủy</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.submitBtn, { backgroundColor: type === 'expense' ? '#DC2626' : '#16A34A' }]}
-              onPress={handleSubmit}
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.submitBtnText}>
-                  {type === 'expense' ? 'Ghi nhận Chi tiêu (-)' : 'Ghi nhận Thu nhập (+)'}
-                </Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
+        </TouchableWithoutFeedback>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  keyboardAvoidingView: {
+    flex: 1,
+  },
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+    backgroundColor: 'rgba(15, 23, 42, 0.5)',
     justifyContent: 'flex-end',
   },
   sheetContainer: {
@@ -173,9 +229,19 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     paddingHorizontal: 22,
-    paddingTop: 12,
-    paddingBottom: 36,
+    paddingTop: 10,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 24,
+    maxHeight: '90%',
     ...THEME.shadow,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  headerSpacer: {
+    width: 24,
   },
   indicator: {
     width: 44,
@@ -183,7 +249,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#CBD5E1',
     borderRadius: 3,
     alignSelf: 'center',
-    marginBottom: 14,
+  },
+  closeBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scrollContent: {
+    paddingBottom: 16,
   },
   title: {
     fontSize: 20,
@@ -195,13 +271,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#64748B',
     textAlign: 'center',
-    marginBottom: 18,
+    marginBottom: 16,
     marginTop: 2,
   },
   typeRow: {
     flexDirection: 'row',
     gap: 12,
-    marginBottom: 18,
+    marginBottom: 16,
   },
   typeBtn: {
     flex: 1,
@@ -217,16 +293,35 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#475569',
   },
+  labelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
   inputLabel: {
     fontSize: 13,
     fontWeight: '700',
     color: '#334155',
-    marginBottom: 6,
+  },
+  hideKeyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E0F2FE',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  hideKeyText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#0284C7',
   },
   amountInput: {
     backgroundColor: '#F8FAFC',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderWidth: 1.5,
+    borderColor: '#BAE6FD',
     borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -245,7 +340,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 14,
     color: '#0F172A',
-    marginBottom: 24,
+    marginBottom: 22,
   },
   actionRow: {
     flexDirection: 'row',
