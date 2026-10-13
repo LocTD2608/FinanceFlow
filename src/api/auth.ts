@@ -68,7 +68,19 @@ export const authApi = {
       // Offline fallback
       const rawUsers = await AsyncStorage.getItem(LOCAL_USERS_KEY);
       const users: Array<User & { password: string }> = rawUsers ? JSON.parse(rawUsers) : [];
-      const user = users.find(u => (u.email === identifier || u.phone === identifier) && u.password === password);
+      let user = users.find(u => (u.email === identifier || u.phone === identifier) && u.password === password);
+      
+      // Hỗ trợ đăng nhập demo nhanh khi chưa có tài khoản
+      if (!user && (identifier === 'demo@financeflow.vn' || identifier === 'demo' || identifier === '0901234567')) {
+        user = {
+          id: 'u_demo_123',
+          username: 'Nguyễn Demo',
+          phone: '0901234567',
+          email: 'demo@financeflow.vn',
+          password,
+        };
+      }
+
       if (!user) {
         return { success: false, message: 'Tài khoản hoặc mật khẩu không chính xác.' };
       }

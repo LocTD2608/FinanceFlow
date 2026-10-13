@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   ScrollView,
   Image,
   Dimensions,
@@ -12,6 +11,7 @@ import {
   Platform,
   StatusBar,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path, Line } from 'react-native-svg';
 import {
   Wallet,
@@ -26,13 +26,19 @@ import { useAuthStore } from '../../store/useAuthStore';
 import { useTransactionStore } from '../../store/useTransactionStore';
 import { transactionApi } from '../../api/transaction';
 import AddTransactionModal from './AddTransactionModal';
+import CreateBudgetScreen from '../budget/CreateBudgetScreen';
+import { Alert } from 'react-native';
 
 const { width } = Dimensions.get('window');
 
 // Mascot bear image
 const MASCOT_IMG = require('../../../assets/mascot.png');
 
-export default function FinancialCenterScreen() {
+interface Props {
+  onLogout?: () => void;
+}
+
+export default function FinancialCenterScreen({ onLogout }: Props) {
   const { token } = useAuthStore();
   const { summary, transactions, fetchSummary, fetchTransactions } = useTransactionStore();
 
@@ -171,6 +177,25 @@ export default function FinancialCenterScreen() {
   const cy = 150;
   const innerR = 64;
   const outerR = 120;
+
+  // Nếu người dùng chọn tab Lưu -> Hiển thị Màn hình Tạo ngân sách chuẩn mockup
+  if (activeTab === 'save') {
+    return (
+      <>
+        <CreateBudgetScreen
+          onBackToFinance={() => setActiveTab('finance')}
+          onOpenAddModal={() => setIsAddModalOpen(true)}
+        />
+        <AddTransactionModal
+          visible={isAddModalOpen}
+          onClose={() => setIsAddModalOpen(false)}
+          onSuccess={() => {
+            loadData(currentMonthIndex);
+          }}
+        />
+      </>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -334,10 +359,10 @@ export default function FinancialCenterScreen() {
             onPress={() => setActiveTab('save')}
             activeOpacity={0.7}
           >
-            <View style={[styles.navIconCircle, activeTab === 'save' && styles.navIconCircleActive]}>
-              <Bookmark size={22} color={activeTab === 'save' ? '#0F172A' : '#64748B'} />
+            <View style={styles.navIconCircle}>
+              <Bookmark size={22} color="#64748B" />
             </View>
-            <Text style={[styles.navLabel, activeTab === 'save' && styles.navLabelActive]}>
+            <Text style={styles.navLabel}>
               Lưu
             </Text>
           </TouchableOpacity>
@@ -359,7 +384,22 @@ export default function FinancialCenterScreen() {
           {/* 5. Cài đặt */}
           <TouchableOpacity
             style={styles.navItem}
-            onPress={() => setActiveTab('settings')}
+            onPress={() => {
+              Alert.alert(
+                'Cài đặt hệ thống',
+                'Bạn muốn làm gì?',
+                [
+                  { text: 'Đóng', style: 'cancel' },
+                  {
+                    text: 'Đăng xuất',
+                    style: 'destructive',
+                    onPress: () => {
+                      if (onLogout) onLogout();
+                    },
+                  },
+                ]
+              );
+            }}
             activeOpacity={0.7}
           >
             <View style={[styles.navIconCircle, activeTab === 'settings' && styles.navIconCircleActive]}>
@@ -391,7 +431,7 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: '#BAE6FD',
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 28) + 4 : 0,
   },
   scrollContainer: {
     paddingHorizontal: 16,
