@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuthStore } from './src/store/useAuthStore';
 import WelcomeScreen from './src/screens/auth/WelcomeScreen';
 import LoginScreen from './src/screens/auth/LoginScreen';
@@ -39,7 +40,7 @@ export default function App() {
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaProvider style={styles.container}>
       <StatusBar style="dark" />
 
       {/* 1. Màn hình mở đầu (Onboarding) chuẩn mascot chú gấu cầm tiền */}
@@ -75,7 +76,7 @@ export default function App() {
       {currentScreen === 'home' && (
         <FinancialCenterScreen onLogout={() => setCurrentScreen('welcome')} />
       )}
-    </View>
+    </SafeAreaProvider>
   );
 }
 

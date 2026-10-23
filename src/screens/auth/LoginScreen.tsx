@@ -89,6 +89,36 @@ export default function LoginScreen({ onNavigateToRegister, onLoginSuccess }: Pr
             {/* Thông báo lỗi nếu có */}
             {errorMsg ? <Text style={styles.errorText}>{errorMsg}</Text> : null}
 
+            {/* Quick Fill Admin / Test Accounts */}
+            <View style={styles.testAccountBox}>
+              <Text style={styles.testAccountTitle}>⚡ Tài khoản kiểm thử nhanh:</Text>
+              <View style={styles.testBtnRow}>
+                <TouchableOpacity
+                  style={styles.testBtn}
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    setIdentifier('admin');
+                    setPassword('admin123');
+                    setErrorMsg('');
+                  }}
+                >
+                  <Text style={styles.testBtnText}>👑 Admin (admin / admin123)</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.testBtn, styles.testBtnDemo]}
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    setIdentifier('demo');
+                    setPassword('123456');
+                    setErrorMsg('');
+                  }}
+                >
+                  <Text style={styles.testBtnDemoText}>👤 Demo (demo / 123456)</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
             {/* Các liên kết phụ */}
             <View style={styles.linksContainer}>
               <TouchableOpacity onPress={onNavigateToRegister} activeOpacity={0.7}>
@@ -173,6 +203,46 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginBottom: 12,
     textAlign: 'center',
+  },
+  testAccountBox: {
+    backgroundColor: '#F0F9FF',
+    borderWidth: 1,
+    borderColor: '#BAE6FD',
+    borderRadius: 16,
+    padding: 10,
+    marginBottom: 12,
+  },
+  testAccountTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#0369A1',
+    marginBottom: 8,
+  },
+  testBtnRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  testBtn: {
+    backgroundColor: '#0284C7',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+  },
+  testBtnText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  testBtnDemo: {
+    backgroundColor: '#E0F2FE',
+    borderWidth: 1,
+    borderColor: '#7DD3FC',
+  },
+  testBtnDemoText: {
+    color: '#0369A1',
+    fontSize: 11,
+    fontWeight: '700',
   },
   linksContainer: {
     marginTop: 8,

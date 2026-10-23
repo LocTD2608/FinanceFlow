@@ -21,12 +21,17 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  QrCode,
 } from 'lucide-react-native';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useTransactionStore } from '../../store/useTransactionStore';
 import { transactionApi } from '../../api/transaction';
 import AddTransactionModal from './AddTransactionModal';
 import CreateBudgetScreen from '../budget/CreateBudgetScreen';
+import PaymentScreen from '../payment/PaymentScreen';
+import CashFlowScreen from '../cash/CashFlowScreen';
+import ExpenseAnalyticsScreen from '../analytics/ExpenseAnalyticsScreen';
+import ProfileScreen from '../profile/ProfileScreen';
 import { Alert } from 'react-native';
 
 const { width } = Dimensions.get('window');
@@ -45,7 +50,7 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
   const currentYear = new Date().getFullYear();
   // Khởi tạo tháng hiện tại (mặc định lấy tháng thực tế của hệ thống)
   const [currentMonthIndex, setCurrentMonthIndex] = useState(new Date().getMonth() + 1);
-  const [activeTab, setActiveTab] = useState<'finance' | 'add' | 'save' | 'chart' | 'settings'>('finance');
+  const [activeTab, setActiveTab] = useState<'finance' | 'payment' | 'cash' | 'add' | 'save' | 'chart' | 'settings'>('finance');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [prevMonthExpense, setPrevMonthExpense] = useState<number>(2820000); // Mặc định 2.820.000 để chênh lệch 300.000đ
@@ -178,7 +183,28 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
   const innerR = 64;
   const outerR = 120;
 
-  // Nếu người dùng chọn tab Lưu -> Hiển thị Màn hình Tạo ngân sách chuẩn mockup
+  // 1. Màn hình Thanh toán (5 bước chuẩn Figma)
+  if (activeTab === 'payment') {
+    return (
+      <PaymentScreen
+        onBackToHome={() => setActiveTab('finance')}
+        onNavigateToTab={(t) => setActiveTab(t)}
+      />
+    );
+  }
+
+  // 2. Màn hình Thêm/Trừ tiền mặt (Image 1 chuẩn Figma)
+  if (activeTab === 'cash') {
+    return (
+      <CashFlowScreen
+        onBack={() => setActiveTab('finance')}
+        onNavigateToBudget={() => setActiveTab('save')}
+        onNavigateToTab={(t) => setActiveTab(t)}
+      />
+    );
+  }
+
+  // 3. Màn hình Tạo ngân sách (chuẩn mockup)
   if (activeTab === 'save') {
     return (
       <>
@@ -194,6 +220,37 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
           }}
         />
       </>
+    );
+  }
+
+  // 4. Màn hình Biểu đồ & Xếp hạng chi tiêu (Image 2 chuẩn Figma)
+  if (activeTab === 'chart') {
+    return (
+      <>
+        <ExpenseAnalyticsScreen
+          onBack={() => setActiveTab('finance')}
+          onOpenAddModal={() => setIsAddModalOpen(true)}
+          onNavigateToTab={(t) => setActiveTab(t)}
+        />
+        <AddTransactionModal
+          visible={isAddModalOpen}
+          onClose={() => setIsAddModalOpen(false)}
+          onSuccess={() => {
+            loadData(currentMonthIndex);
+          }}
+        />
+      </>
+    );
+  }
+
+  // 5. Màn hình Hồ sơ cá nhân & Cài đặt (Image 3 chuẩn Figma)
+  if (activeTab === 'settings') {
+    return (
+      <ProfileScreen
+        onBack={() => setActiveTab('finance')}
+        onLogout={onLogout}
+        onNavigateToTab={(t) => setActiveTab(t)}
+      />
     );
   }
 
@@ -283,6 +340,22 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
           </Text>
         </View>
 
+        {/* Nút hành động nhanh: Quét QR & Thanh toán */}
+        <TouchableOpacity
+          style={styles.quickPayBanner}
+          onPress={() => setActiveTab('payment')}
+          activeOpacity={0.8}
+        >
+          <View style={styles.quickPayIconBox}>
+            <QrCode size={20} color="#0284C7" />
+          </View>
+          <View style={styles.quickPayTextContainer}>
+            <Text style={styles.quickPayTitle}>Quét mã QR thanh toán</Text>
+            <Text style={styles.quickPaySubtitle}>Chuyển tiền & phân loại tự động vào ngân sách</Text>
+          </View>
+          <ChevronRight size={18} color="#64748B" />
+        </TouchableOpacity>
+
         {/* Biểu đồ Donut Chart trung tâm */}
         <View style={styles.chartSection}>
           <Svg width={300} height={300} viewBox="0 0 300 300">
@@ -328,10 +401,10 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
             onPress={() => setActiveTab('finance')}
             activeOpacity={0.7}
           >
-            <View style={[styles.navIconCircle, activeTab === 'finance' && styles.navIconCircleActive]}>
-              <Wallet size={22} color={activeTab === 'finance' ? '#0F172A' : '#64748B'} />
+            <View style={[styles.navIconCircle, styles.navIconCircleActive]}>
+              <Wallet size={22} color="#0F172A" />
             </View>
-            <Text style={[styles.navLabel, activeTab === 'finance' && styles.navLabelActive]}>
+            <Text style={[styles.navLabel, styles.navLabelActive]}>
               Tài chính
             </Text>
           </TouchableOpacity>
@@ -339,16 +412,13 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
           {/* 2. Thêm */}
           <TouchableOpacity
             style={styles.navItem}
-            onPress={() => {
-              setActiveTab('add');
-              setIsAddModalOpen(true);
-            }}
+            onPress={() => setActiveTab('cash')}
             activeOpacity={0.7}
           >
-            <View style={[styles.navIconCircle, activeTab === 'add' && styles.navIconCircleActive]}>
-              <Plus size={22} color={activeTab === 'add' ? '#0F172A' : '#64748B'} />
+            <View style={styles.navIconCircle}>
+              <Plus size={22} color="#64748B" />
             </View>
-            <Text style={[styles.navLabel, activeTab === 'add' && styles.navLabelActive]}>
+            <Text style={styles.navLabel}>
               Thêm
             </Text>
           </TouchableOpacity>
@@ -356,7 +426,7 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
           {/* 3. Lưu */}
           <TouchableOpacity
             style={styles.navItem}
-            onPress={() => setActiveTab('save')}
+            onPress={() => setActiveTab('cash')}
             activeOpacity={0.7}
           >
             <View style={styles.navIconCircle}>
@@ -373,10 +443,10 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
             onPress={() => setActiveTab('chart')}
             activeOpacity={0.7}
           >
-            <View style={[styles.navIconCircle, activeTab === 'chart' && styles.navIconCircleActive]}>
-              <BarChart2 size={22} color={activeTab === 'chart' ? '#0F172A' : '#64748B'} />
+            <View style={styles.navIconCircle}>
+              <BarChart2 size={22} color="#64748B" />
             </View>
-            <Text style={[styles.navLabel, activeTab === 'chart' && styles.navLabelActive]}>
+            <Text style={styles.navLabel}>
               Biểu đồ
             </Text>
           </TouchableOpacity>
@@ -384,28 +454,13 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
           {/* 5. Cài đặt */}
           <TouchableOpacity
             style={styles.navItem}
-            onPress={() => {
-              Alert.alert(
-                'Cài đặt hệ thống',
-                'Bạn muốn làm gì?',
-                [
-                  { text: 'Đóng', style: 'cancel' },
-                  {
-                    text: 'Đăng xuất',
-                    style: 'destructive',
-                    onPress: () => {
-                      if (onLogout) onLogout();
-                    },
-                  },
-                ]
-              );
-            }}
+            onPress={() => setActiveTab('settings')}
             activeOpacity={0.7}
           >
-            <View style={[styles.navIconCircle, activeTab === 'settings' && styles.navIconCircleActive]}>
-              <Settings size={22} color={activeTab === 'settings' ? '#0F172A' : '#64748B'} />
+            <View style={styles.navIconCircle}>
+              <Settings size={22} color="#64748B" />
             </View>
-            <Text style={[styles.navLabel, activeTab === 'settings' && styles.navLabelActive]}>
+            <Text style={styles.navLabel}>
               Cài đặt
             </Text>
           </TouchableOpacity>
@@ -655,5 +710,40 @@ const styles = StyleSheet.create({
   navLabelActive: {
     color: '#0F172A',
     fontWeight: '800',
+  },
+  quickPayBanner: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 14,
+    marginVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  quickPayIconBox: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: '#E0F2FE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickPayTextContainer: {
+    flex: 1,
+  },
+  quickPayTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  quickPaySubtitle: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
   },
 });

@@ -70,8 +70,17 @@ export const authApi = {
       const users: Array<User & { password: string }> = rawUsers ? JSON.parse(rawUsers) : [];
       let user = users.find(u => (u.email === identifier || u.phone === identifier) && u.password === password);
       
-      // Hỗ trợ đăng nhập demo nhanh khi chưa có tài khoản
-      if (!user && (identifier === 'demo@financeflow.vn' || identifier === 'demo' || identifier === '0901234567')) {
+      // Hỗ trợ đăng nhập tài khoản Admin & Demo nhanh
+      const idLower = identifier.trim().toLowerCase();
+      if (!user && (idLower === 'admin' || idLower === 'admin@financeflow.vn' || idLower === 'admin@gmail.com' || idLower === '0988888888')) {
+        user = {
+          id: 'u_admin_999',
+          username: 'Admin FinanceFlow',
+          phone: '0988888888',
+          email: 'admin@financeflow.vn',
+          password,
+        };
+      } else if (!user && (idLower === 'demo@financeflow.vn' || idLower === 'demo' || idLower === '0901234567')) {
         user = {
           id: 'u_demo_123',
           username: 'Nguyễn Demo',
