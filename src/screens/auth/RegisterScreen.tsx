@@ -38,6 +38,10 @@ export default function RegisterScreen({ onNavigateToLogin, onRegisterSuccess }:
       setErrorMsg('Vui lòng điền đầy đủ tất cả thông tin.');
       return;
     }
+    if (password.length < 6) {
+      setErrorMsg('Mật khẩu phải có tối thiểu 6 ký tự.');
+      return;
+    }
 
     setLoading(true);
     const res = await authApi.register(username.trim(), phone.trim(), email.trim(), password);
@@ -108,7 +112,7 @@ export default function RegisterScreen({ onNavigateToLogin, onRegisterSuccess }:
               <View style={styles.passwordContainer}>
                 <TextInput
                   style={styles.passwordInput}
-                  placeholder="Nhập mật khẩu (tối thiểu 6 ký tự)..."
+                  placeholder="Nhập mật khẩu..."
                   placeholderTextColor="#94A3B8"
                   secureTextEntry={!showPassword}
                   value={password}
@@ -127,6 +131,9 @@ export default function RegisterScreen({ onNavigateToLogin, onRegisterSuccess }:
                   )}
                 </TouchableOpacity>
               </View>
+              {password.length >= 6 ? (
+                <Text style={styles.helperTextSuccess}>✓ Tối thiểu 6 ký tự</Text>
+              ) : null}
             </View>
 
             {/* Thông báo lỗi nếu có */}
@@ -226,6 +233,13 @@ const styles = StyleSheet.create({
     paddingLeft: 8,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  helperTextSuccess: {
+    fontSize: 12,
+    color: '#16A34A',
+    fontWeight: '600',
+    marginTop: 6,
+    marginLeft: 2,
   },
   errorText: {
     color: THEME.colors.error,

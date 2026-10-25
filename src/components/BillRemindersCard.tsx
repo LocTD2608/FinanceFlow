@@ -114,9 +114,9 @@ export default function BillRemindersCard({ token, wallet, onPaid, onInsufficien
 
       {adding && (
         <View style={styles.form}>
-          <TextInput style={styles.input} placeholder="Tên hóa đơn (vd: Tiền điện)" value={title} onChangeText={setTitle} />
-          <TextInput style={styles.input} placeholder="Số tiền" keyboardType="number-pad" value={amount} onChangeText={setAmount} />
-          <TextInput style={styles.input} placeholder="Ngày đến hạn (DD/MM/YYYY)" value={due} onChangeText={setDue} />
+          <TextInput style={styles.input} placeholder="Tên hóa đơn..." value={title} onChangeText={setTitle} />
+          <TextInput style={styles.input} placeholder="Số tiền (đ)..." keyboardType="number-pad" value={amount} onChangeText={setAmount} />
+          <TextInput style={styles.input} placeholder="Ngày đến hạn (DD/MM/YYYY)..." value={due} onChangeText={setDue} />
           <View style={styles.cycleRow}>
             {CYCLES.map((c) => (
               <TouchableOpacity key={c.id} style={[styles.chip, cycle === c.id && styles.chipActive]} onPress={() => setCycle(c.id)}>

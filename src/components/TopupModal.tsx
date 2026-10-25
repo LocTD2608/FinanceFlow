@@ -138,7 +138,7 @@ export default function TopupModal({ visible, token, wallet, suggestedAmount, on
               <Text style={styles.label}>Ghi chú{needsNote ? ' *' : ' (tuỳ chọn)'}</Text>
               <TextInput
                 style={[styles.noteInput, needsNote && !note.trim() && error ? styles.inputError : null]}
-                placeholder={needsNote ? 'Nhập lý do (bắt buộc)' : 'Ví dụ: Lương tháng 10'}
+                placeholder="Nhập nội dung ghi chú..."
                 placeholderTextColor="#94A3B8"
                 value={note}
                 maxLength={NOTE_MAX}
@@ -147,6 +147,9 @@ export default function TopupModal({ visible, token, wallet, suggestedAmount, on
                   setError('');
                 }}
               />
+              {needsNote && note.trim().length > 0 ? (
+                <Text style={styles.validHint}>✓ Đã có ghi chú ({note.trim().length}/{NOTE_MAX})</Text>
+              ) : null}
 
               {!!error && <Text style={styles.errorText}>{error}</Text>}
 
@@ -218,6 +221,7 @@ const styles = StyleSheet.create({
   },
   inputError: { borderColor: '#EF4444' },
   errorText: { color: '#DC2626', fontSize: 13, marginBottom: 10 },
+  validHint: { color: '#16A34A', fontSize: 12, fontWeight: '600', marginBottom: 10 },
   actionRow: { flexDirection: 'row', gap: 12, marginTop: 8 },
   cancelBtn: { flex: 1, paddingVertical: 14, borderRadius: 14, backgroundColor: '#F1F5F9', alignItems: 'center' },
   cancelText: { fontSize: 15, fontWeight: '600', color: '#475569' },
