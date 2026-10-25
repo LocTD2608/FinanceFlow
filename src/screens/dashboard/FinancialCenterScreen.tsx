@@ -28,6 +28,11 @@ import {
 import { useAuthStore } from '../../store/useAuthStore';
 import { useTransactionStore } from '../../store/useTransactionStore';
 import { transactionApi } from '../../api/transaction';
+import { walletApi, WalletItem } from '../../api/wallet';
+import TopupModal from '../../components/TopupModal';
+import EditBalanceModal from '../../components/EditBalanceModal';
+import NetWorthCard from '../../components/NetWorthCard';
+import BillRemindersCard from '../../components/BillRemindersCard';
 import CreateBudgetScreen from '../budget/CreateBudgetScreen';
 import PaymentScreen from '../payment/PaymentScreen';
 import CashFlowScreen from '../cash/CashFlowScreen';
@@ -54,6 +59,23 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
   const [currentMonthIndex, setCurrentMonthIndex] = useState(new Date().getMonth() + 1);
   const [activeTab, setActiveTab] = useState<'finance' | 'payment' | 'cash' | 'save' | 'chart' | 'settings'>('finance');
   const [refreshing, setRefreshing] = useState(false);
+  const [wallets, setWallets] = useState<WalletItem[]>([]);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [topupVisible, setTopupVisible] = useState(false);
+  const [topupSuggest, setTopupSuggest] = useState(0);
+  const [editBalanceVisible, setEditBalanceVisible] = useState(false);
+
+  const loadWallets = useCallback(async () => {
+    const res = await walletApi.getWallets(token || undefined);
+    if (res?.success && Array.isArray(res.data)) setWallets(res.data);
+  }, [token]);
+
+  useEffect(() => {
+    loadWallets();
+  }, [loadWallets, refreshKey]);
+
+  const activeWallets = wallets.filter((w) => !w.isArchived);
+  const defaultWallet = activeWallets[0] || null;
   const [prevMonthExpense, setPrevMonthExpense] = useState<number>(2820000); // Mặc định 2.820.000 để chênh lệch 300.000đ
 
   const loadData = useCallback(async (monthIdx: number) => {
@@ -84,13 +106,15 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
   const onRefresh = async () => {
     setRefreshing(true);
     await loadData(currentMonthIndex);
+    setRefreshKey((k) => k + 1);
     setRefreshing(false);
   };
 
-  // Tính toán số dư hiển thị:
-  // Số dư gốc mockup là 12.450.000đ, tự động cộng dòng tiền ròng thu-chi từ API
+  // Số dư hiển thị = tổng số dư các ví đang dùng (ví thật từ server); chưa tải được thì dùng số mẫu
   const baseBalance = 12450000;
-  const currentBalance = baseBalance + (summary.netCashFlow || 0);
+  const currentBalance = activeWallets.length
+    ? activeWallets.reduce((sum, w) => sum + w.balance, 0)
+    : baseBalance + (summary.netCashFlow || 0);
 
   // Chi tiêu và thu nhập: nếu API có số liệu thì dùng, nếu chưa có thì hiển thị số mặc định mockup
   const usedAmount = summary.totalExpense > 0 ? summary.totalExpense : 3120000;
@@ -364,6 +388,67 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
                 </Text>
               </View>
 
+              {/* Hành động ví: Nạp tiền & Chỉnh số dư */}
+              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>
+                <TouchableOpacity
+                  style={[styles.walletActionBtn, { backgroundColor: '#DCFCE7' }]}
+                  onPress={() => {
+                    setTopupSuggest(0);
+                    setTopupVisible(true);
+                  }}
+                  activeOpacity={0.8}
+                  disabled={!defaultWallet}
+                >
+                  <Text style={[styles.walletActionText, { color: '#15803D' }]}>+ Nạp tiền</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.walletActionBtn, { backgroundColor: '#E0F2FE' }]}
+                  onPress={() => setEditBalanceVisible(true)}
+                  activeOpacity={0.8}
+                  disabled={!defaultWallet}
+                >
+                  <Text style={[styles.walletActionText, { color: '#0369A1' }]}>Chỉnh số dư</Text>
+                </TouchableOpacity>
+              </View>
+
+              <NetWorthCard token={token || undefined} refreshKey={refreshKey} />
+
+              <BillRemindersCard
+                token={token || undefined}
+                wallet={defaultWallet}
+                onPaid={() => {
+                  setRefreshKey((k) => k + 1);
+                  loadData(currentMonthIndex);
+                }}
+                onInsufficient={(missing) => {
+                  setTopupSuggest(missing);
+                  setTopupVisible(true);
+                }}
+              />
+
+              <TopupModal
+                visible={topupVisible}
+                token={token || undefined}
+                wallet={defaultWallet}
+                suggestedAmount={topupSuggest}
+                onClose={() => setTopupVisible(false)}
+                onSuccess={() => {
+                  setTopupVisible(false);
+                  setRefreshKey((k) => k + 1);
+                  loadData(currentMonthIndex);
+                }}
+              />
+              <EditBalanceModal
+                visible={editBalanceVisible}
+                token={token || undefined}
+                wallet={defaultWallet}
+                onClose={() => setEditBalanceVisible(false)}
+                onSuccess={() => {
+                  setEditBalanceVisible(false);
+                  setRefreshKey((k) => k + 1);
+                }}
+              />
+
               {/* Nút hành động nhanh: Quét QR & Thanh toán */}
               <TouchableOpacity
                 style={styles.quickPayBanner}
@@ -453,6 +538,16 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     maxWidth: 480,
+  },
+  walletActionBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 16,
+    alignItems: 'center',
+  },
+  walletActionText: {
+    fontSize: 14,
+    fontWeight: '700',
   },
   safeArea: {
     flex: 1,

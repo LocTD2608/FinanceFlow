@@ -127,6 +127,22 @@ export const transactionApi = {
       ];
 
       const sourceWallet = wallets.find((w: { id: string }) => w.id === input.walletId);
+      // Ví thường không được âm; ví credit_card được phép âm (dư nợ)
+      if (
+        sourceWallet &&
+        (input.type === 'expense' || input.type === 'transfer') &&
+        sourceWallet.type !== 'credit_card' &&
+        sourceWallet.balance < input.amount
+      ) {
+        return {
+          success: false,
+          code: 'INSUFFICIENT_BALANCE',
+          message: 'Số dư trong ví không đủ để thực hiện giao dịch.',
+          currentBalance: sourceWallet.balance,
+          requiredAmount: input.amount,
+          shortfall: input.amount - sourceWallet.balance,
+        };
+      }
       if (sourceWallet) {
         if (input.type === 'expense') {
           sourceWallet.balance -= input.amount;

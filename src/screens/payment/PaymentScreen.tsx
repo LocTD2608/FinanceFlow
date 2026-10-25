@@ -37,7 +37,10 @@ import {
 } from 'lucide-react-native';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useTransactionStore } from '../../store/useTransactionStore';
-import { walletApi } from '../../api/wallet';
+import { walletApi, WalletItem } from '../../api/wallet';
+import { categoryApi, CategoryItemData } from '../../api/category';
+import { paymentApi } from '../../api/payment';
+import TopupModal from '../../components/TopupModal';
 
 const { width } = Dimensions.get('window');
 
@@ -65,7 +68,7 @@ const CATEGORIES: CategoryItem[] = [
 
 export default function PaymentScreen({ onBackToHome, onNavigateToTab, hideBottomBar }: Props) {
   const { token } = useAuthStore();
-  const { createTransaction, summary } = useTransactionStore();
+  const { fetchTransactions, fetchSummary } = useTransactionStore();
 
   const [step, setStep] = useState<PaymentStep>('qr');
   const [selectedCategory, setSelectedCategory] = useState<string>('other');
@@ -76,8 +79,21 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab, hideBotto
 
   // OTP Modal State
   const [isOtpModalVisible, setIsOtpModalVisible] = useState<boolean>(false);
-  const [otpCode, setOtpCode] = useState<string>('131106');
-  const [countdown, setCountdown] = useState<number>(55);
+  const [otpCode, setOtpCode] = useState<string>('');
+  const [countdown, setCountdown] = useState<number>(0);
+  const [resendIn, setResendIn] = useState<number>(0);
+  const [otpError, setOtpError] = useState<string>('');
+  const [intentId, setIntentId] = useState<string | null>(null);
+  const [maskedEmail, setMaskedEmail] = useState<string>('');
+  const [txCode, setTxCode] = useState<string>('');
+
+  // Ví & danh mục thật từ server
+  const [wallet, setWallet] = useState<WalletItem | null>(null);
+  const [serverCategories, setServerCategories] = useState<CategoryItemData[]>([]);
+
+  // Nạp thêm tiền khi thiếu số dư
+  const [isTopupVisible, setIsTopupVisible] = useState<boolean>(false);
+  const [shortfall, setShortfall] = useState<number>(0);
 
   // Modal Lưu người nhận thành công
   const [isSavedRecipientModalVisible, setIsSavedRecipientModalVisible] = useState<boolean>(false);
@@ -94,7 +110,7 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab, hideBotto
   }, [isOtpModalVisible, countdown]);
 
   const handleNextFromInput = () => {
-    if (!note.trim()) {
+    if (!note.trim() || (selectedCategory === 'other' && note.trim().length > 50)) {
       setNoteError(true);
       return;
     }
@@ -102,31 +118,152 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab, hideBotto
     setStep('confirm');
   };
 
-  const handleOpenOtp = () => {
-    setCountdown(55);
-    setIsOtpModalVisible(true);
+  // Đếm ngược thời gian được phép gửi lại OTP
+  useEffect(() => {
+    if (!isOtpModalVisible || resendIn <= 0) return;
+    const timer = setInterval(() => setResendIn((prev) => Math.max(0, prev - 1)), 1000);
+    return () => clearInterval(timer);
+  }, [isOtpModalVisible, resendIn]);
+
+  const refreshWallet = async () => {
+    const w = await walletApi.getDefaultWallet(token || undefined);
+    if (w) setWallet(w);
+    return w;
+  };
+
+  // Nạp ví mặc định + danh mục chi từ server khi mở màn hình
+  useEffect(() => {
+    refreshWallet();
+    categoryApi.getCategories(token || undefined, 'expense').then((res) => {
+      if (res?.success && Array.isArray(res.data)) setServerCategories(res.data);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  // Ánh xạ danh mục trên màn hình sang danh mục thật của server
+  const SERVER_CATEGORY_NAMES: Record<string, string[]> = {
+    food: ['Ăn uống'],
+    shopping: ['Mua sắm'],
+    transport: ['Đi lại', 'Di chuyển'],
+    entertainment: ['Giải trí'],
+    other: ['Khác (Chi)', 'Khác'],
+  };
+  const resolveCategoryId = (): string | undefined => {
+    const names = SERVER_CATEGORY_NAMES[selectedCategory] || [];
+    const found = serverCategories.find((c) => names.includes(c.name));
+    return found ? found._id || found.id : undefined;
+  };
+
+  // Huỷ khoản chi: quay về màn đầu, bỏ dữ liệu đang nhập (tiền đã nạp vẫn giữ nguyên)
+  const cancelPayment = () => {
+    setIntentId(null);
+    setOtpCode('');
+    setOtpError('');
+    setAmount('20.000');
+    setNote('Thanh toán chi phí khác');
+    setStep('qr');
+  };
+
+  const promptTopup = (missing: number) => {
+    setShortfall(missing);
+    Alert.alert(
+      'Số dư không đủ',
+      `Ví còn thiếu ${missing.toLocaleString('vi-VN')} đ để thanh toán. Bạn có muốn nạp thêm không?`,
+      [
+        { text: 'Hủy', style: 'cancel', onPress: cancelPayment },
+        { text: 'Nạp thêm', onPress: () => setIsTopupVisible(true) },
+      ]
+    );
+  };
+
+  const handleOpenOtp = async () => {
+    if (isProcessing) return;
+    const numericAmount = Number(amount.replace(/[^0-9]/g, ''));
+    if (!numericAmount || numericAmount <= 0) {
+      Alert.alert('Lỗi', 'Vui lòng nhập số tiền hợp lệ.');
+      return;
+    }
+    const w = wallet || (await refreshWallet());
+    const categoryId = resolveCategoryId();
+    if (!w || !categoryId) {
+      Alert.alert('Lỗi', 'Chưa tải được ví hoặc danh mục. Vui lòng kiểm tra kết nối và thử lại.');
+      return;
+    }
+
+    setIsProcessing(true);
+    const res = await paymentApi.createIntent(token || undefined, {
+      walletId: (w._id || w.id) as string,
+      categoryId,
+      amount: numericAmount,
+      note: note.trim(),
+    });
+    setIsProcessing(false);
+
+    if (res.success && res.data) {
+      setIntentId(res.data.intentId);
+      setMaskedEmail(res.data.email);
+      setOtpCode('');
+      setOtpError('');
+      setCountdown(180);
+      setResendIn(60);
+      setIsOtpModalVisible(true);
+    } else if (res.code === 'INSUFFICIENT_BALANCE') {
+      if (typeof res.currentBalance === 'number') setWallet({ ...w, balance: res.currentBalance });
+      promptTopup(res.shortfall ?? numericAmount);
+    } else {
+      // Mất mạng: không mở modal, không tạo giao dịch, giữ nguyên dữ liệu đã nhập
+      Alert.alert(
+        res.code === 'NETWORK_ERROR' ? 'Mất kết nối mạng' : 'Không thể gửi mã OTP',
+        res.message || 'Vui lòng thử lại sau.'
+      );
+    }
+  };
+
+  const handleResendOtp = async () => {
+    if (!intentId || resendIn > 0 || isProcessing) return;
+    setIsProcessing(true);
+    const res = await paymentApi.resendOtp(token || undefined, intentId);
+    setIsProcessing(false);
+    if (res.success) {
+      setOtpCode('');
+      setOtpError('');
+      setCountdown(180);
+      setResendIn(60);
+    } else {
+      setOtpError(res.message || 'Không thể gửi lại mã.');
+    }
   };
 
   const handleConfirmOtp = async () => {
+    if (!intentId || isProcessing) return;
+    if (!/^\d{6}$/.test(otpCode)) {
+      setOtpError('Mã OTP gồm 6 chữ số.');
+      return;
+    }
     setIsProcessing(true);
-    try {
-      const numericAmount = Number(amount.replace(/[^0-9]/g, ''));
-      const defaultWallet = await walletApi.getDefaultWallet(token || undefined);
-      const walletId = defaultWallet?._id || defaultWallet?.id || 'w_cash_default';
+    setOtpError('');
+    const res = await paymentApi.confirm(token || undefined, intentId, otpCode);
+    setIsProcessing(false);
 
-      await createTransaction(token || undefined, {
-        amount: numericAmount > 0 ? numericAmount : 20000,
-        type: 'expense',
-        walletId,
-        note: `Thanh toán: ${note.trim() || 'Thanh toán QR'}`,
-        transactionDate: new Date().toISOString(),
-      });
-    } catch {
-      // offline / catch
-    } finally {
-      setIsProcessing(false);
+    if (res.success) {
+      setTxCode(String(res.data?._id || '').slice(-10).toUpperCase());
       setIsOtpModalVisible(false);
+      setIntentId(null);
       setStep('success');
+      refreshWallet();
+      fetchTransactions(token || undefined);
+      fetchSummary(token || undefined);
+    } else if (res.code === 'INSUFFICIENT_BALANCE') {
+      setIsOtpModalVisible(false);
+      setIntentId(null);
+      promptTopup(res.shortfall ?? 0);
+    } else if (res.code === 'TOO_MANY_ATTEMPTS') {
+      setIsOtpModalVisible(false);
+      setIntentId(null);
+      Alert.alert('Đã khóa giao dịch', res.message || 'Nhập sai quá số lần cho phép.');
+    } else {
+      // Sai OTP / hết hạn / mất mạng: giữ nguyên modal để người dùng thử lại
+      setOtpError(res.message || 'Không thể xác nhận thanh toán.');
     }
   };
 
@@ -141,8 +278,8 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab, hideBotto
   };
 
   const formatSeconds = (sec: number) => {
-    const s = sec < 10 ? `0${sec}` : sec;
-    return `0:${s}s`;
+    const s = sec % 60 < 10 ? `0${sec % 60}` : sec % 60;
+    return `${Math.floor(sec / 60)}:${s}s`;
   };
 
   return (
@@ -166,7 +303,7 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab, hideBotto
               <View style={styles.balanceRow}>
                 <Text style={styles.currencySymbol}>đ</Text>
                 <Text style={styles.balanceAmount}>
-                  {Math.max(0, 30000 + (summary.netCashFlow || 0)).toLocaleString('vi-VN')}
+                  {(wallet ? wallet.balance : 0).toLocaleString('vi-VN')}
                 </Text>
                 <View style={styles.cursorBar} />
               </View>
@@ -407,6 +544,13 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab, hideBotto
               </View>
 
               <View style={styles.confirmRow}>
+                <Text style={styles.confirmLabel}>Số dư ví</Text>
+                <Text style={styles.confirmValue}>
+                  {(wallet ? wallet.balance : 0).toLocaleString('vi-VN')}đ
+                </Text>
+              </View>
+
+              <View style={styles.confirmRow}>
                 <Text style={styles.confirmLabel}>Danh mục</Text>
                 <Text style={styles.confirmValue}>
                   {CATEGORIES.find((c) => c.id === selectedCategory)?.label || 'Khác'}
@@ -443,6 +587,14 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab, hideBotto
                 activeOpacity={0.8}
               >
                 <Text style={styles.otpActionBtnText}>Xác nhận bằng mã OTP</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.otpActionBtn, { backgroundColor: '#F1F5F9', marginTop: 10 }]}
+                onPress={cancelPayment}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.otpActionBtnText, { color: '#475569' }]}>Hủy</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -515,7 +667,7 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab, hideBotto
                 </View>
                 <View style={styles.successDetailContent}>
                   <Text style={styles.detailItemLabel}>Mã giao dịch</Text>
-                  <Text style={styles.detailItemValueCode}>BSDHIUHDW98Q0</Text>
+                  <Text style={styles.detailItemValueCode}>{txCode || '—'}</Text>
                 </View>
               </View>
             </View>
@@ -583,9 +735,23 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab, hideBotto
               />
             </View>
 
+            {!!maskedEmail && (
+              <Text style={styles.otpCountdownText}>Mã đã được gửi tới {maskedEmail}</Text>
+            )}
+
             <Text style={styles.otpCountdownText}>
-              Mã OTP còn thời hạn {formatSeconds(countdown)}
+              {countdown > 0 ? `Mã OTP còn thời hạn ${formatSeconds(countdown)}` : 'Mã OTP đã hết hạn'}
             </Text>
+
+            {!!otpError && (
+              <Text style={[styles.otpCountdownText, { color: '#DC2626' }]}>{otpError}</Text>
+            )}
+
+            <TouchableOpacity onPress={handleResendOtp} disabled={resendIn > 0 || isProcessing} activeOpacity={0.7}>
+              <Text style={[styles.otpCountdownText, { color: resendIn > 0 ? '#94A3B8' : '#0284C7', fontWeight: '700' }]}>
+                {resendIn > 0 ? `Gửi lại mã sau ${resendIn}s` : 'Gửi lại mã'}
+              </Text>
+            </TouchableOpacity>
 
             <TouchableOpacity
               style={[styles.otpConfirmBtn, isProcessing && { opacity: 0.7 }]}
@@ -602,6 +768,20 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab, hideBotto
           </View>
         </View>
       </Modal>
+
+      {/* Nạp thêm tiền khi thiếu số dư; xong quay lại màn xác nhận để Tiếp tục / Hủy */}
+      <TopupModal
+        visible={isTopupVisible}
+        token={token || undefined}
+        wallet={wallet}
+        suggestedAmount={shortfall}
+        onClose={() => setIsTopupVisible(false)}
+        onSuccess={(newBalance) => {
+          setIsTopupVisible(false);
+          if (wallet) setWallet({ ...wallet, balance: newBalance });
+          setStep('confirm');
+        }}
+      />
 
       {/* ==============================================================
           MODAL: THÔNG BÁO LƯU NGƯỜI NHẬN THÀNH CÔNG
