@@ -131,8 +131,8 @@ export default function RegisterScreen({ onNavigateToLogin, onRegisterSuccess }:
                   )}
                 </TouchableOpacity>
               </View>
-              {password.length >= 6 ? (
-                <Text style={styles.helperTextSuccess}>✓ Tối thiểu 6 ký tự</Text>
+              {password.length > 0 && password.length < 6 ? (
+                <Text style={styles.helperTextError}>Mật khẩu phải có tối thiểu 6 ký tự ({password.length}/6)</Text>
               ) : null}
             </View>
 
@@ -234,9 +234,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  helperTextSuccess: {
+  helperTextError: {
     fontSize: 12,
-    color: '#16A34A',
+    color: '#DC2626',
     fontWeight: '600',
     marginTop: 6,
     marginLeft: 2,

@@ -147,9 +147,6 @@ export default function TopupModal({ visible, token, wallet, suggestedAmount, on
                   setError('');
                 }}
               />
-              {needsNote && note.trim().length > 0 ? (
-                <Text style={styles.validHint}>✓ Đã có ghi chú ({note.trim().length}/{NOTE_MAX})</Text>
-              ) : null}
 
               {!!error && <Text style={styles.errorText}>{error}</Text>}
 

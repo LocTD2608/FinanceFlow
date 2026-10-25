@@ -34,15 +34,19 @@ const sendOtpToUser = async (userId, otp, amount) => {
     err.status = 400;
     throw err;
   }
+  let sendResult = null;
   try {
-    await mailService.sendOtpEmail(user.email, otp, { amount, ttlMinutes: OTP_TTL_MS / 60000 });
+    sendResult = await mailService.sendOtpEmail(user.email, otp, { amount, ttlMinutes: OTP_TTL_MS / 60000 });
   } catch (e) {
     console.error('Gửi OTP thất bại:', e.message);
     const err = new Error('Không thể gửi email OTP lúc này. Vui lòng thử lại sau.');
     err.status = 502;
     throw err;
   }
-  return mailService.maskEmail(user.email);
+  return {
+    email: mailService.maskEmail(user.email),
+    devOtp: sendResult?.isDev ? otp : undefined,
+  };
 };
 
 /**
@@ -77,7 +81,7 @@ const createIntent = async (req, res) => {
     }
 
     const otp = generateOtp();
-    const email = await sendOtpToUser(req.user.id, otp, amount);
+    const { email, devOtp } = await sendOtpToUser(req.user.id, otp, amount);
 
     const intent = await PaymentIntent.create({
       userId: req.user.id,
@@ -91,7 +95,12 @@ const createIntent = async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      data: { intentId: intent._id, expiresAt: intent.expiresAt, email },
+      data: {
+        intentId: intent._id,
+        expiresAt: intent.expiresAt,
+        email,
+        ...(devOtp ? { devOtp } : {}),
+      },
     });
   } catch (error) {
     return res.status(error.status || 500).json({ success: false, message: error.message });
@@ -135,7 +144,7 @@ const resendOtp = async (req, res) => {
     }
 
     const otp = generateOtp();
-    const email = await sendOtpToUser(req.user.id, otp, intent.amount);
+    const { email, devOtp } = await sendOtpToUser(req.user.id, otp, intent.amount);
 
     intent.otpHash = hashOtp(otp);
     intent.attempts = 0;
@@ -144,7 +153,15 @@ const resendOtp = async (req, res) => {
     intent.expiresAt = new Date(Date.now() + OTP_TTL_MS);
     await intent.save();
 
-    return res.json({ success: true, data: { intentId: intent._id, expiresAt: intent.expiresAt, email } });
+    return res.json({
+      success: true,
+      data: {
+        intentId: intent._id,
+        expiresAt: intent.expiresAt,
+        email,
+        ...(devOtp ? { devOtp } : {}),
+      },
+    });
   } catch (error) {
     return res.status(error.status || 500).json({ success: false, message: error.message });
   }

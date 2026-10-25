@@ -27,10 +27,9 @@ import {
 } from 'lucide-react-native';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useTransactionStore } from '../../store/useTransactionStore';
-import { transactionApi } from '../../api/transaction';
+import { transactionApi, TransactionItem } from '../../api/transaction';
 import { walletApi, WalletItem } from '../../api/wallet';
 import TopupModal from '../../components/TopupModal';
-import EditBalanceModal from '../../components/EditBalanceModal';
 import NetWorthCard from '../../components/NetWorthCard';
 import BillRemindersCard from '../../components/BillRemindersCard';
 import CreateBudgetScreen from '../budget/CreateBudgetScreen';
@@ -63,7 +62,6 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [topupVisible, setTopupVisible] = useState(false);
   const [topupSuggest, setTopupSuggest] = useState(0);
-  const [editBalanceVisible, setEditBalanceVisible] = useState(false);
 
   const loadWallets = useCallback(async () => {
     const res = await walletApi.getWallets(token || undefined);
@@ -76,26 +74,34 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
 
   const activeWallets = wallets.filter((w) => !w.isArchived);
   const defaultWallet = activeWallets[0] || null;
-  const [prevMonthExpense, setPrevMonthExpense] = useState<number>(2820000); // Mặc định 2.820.000 để chênh lệch 300.000đ
+  const [prevMonthExpense, setPrevMonthExpense] = useState<number>(0);
+  const [allTransactions, setAllTransactions] = useState<TransactionItem[]>([]);
 
   const loadData = useCallback(async (monthIdx: number) => {
     const monthStr = `${currentYear}-${String(monthIdx).padStart(2, '0')}`;
     const prevIdx = monthIdx > 1 ? monthIdx - 1 : 12;
     const prevMonthStr = `${monthIdx > 1 ? currentYear : currentYear - 1}-${String(prevIdx).padStart(2, '0')}`;
 
-    await Promise.all([
+    const [sumRes, txRes, allTxRes] = await Promise.all([
       fetchSummary(token || undefined, monthStr),
       fetchTransactions(token || undefined, monthStr),
+      transactionApi.getTransactions(token || undefined, { limit: 1000 }),
     ]);
 
     // Lấy thêm summary tháng trước để tính so sánh chênh lệch
     try {
       const prevRes = await transactionApi.getSummary(token || undefined, prevMonthStr);
-      if (prevRes.success && prevRes.data) {
-        setPrevMonthExpense(prevRes.data.totalExpense);
+      if (prevRes?.success && prevRes.data) {
+        setPrevMonthExpense(prevRes.data.totalExpense || 0);
+      } else {
+        setPrevMonthExpense(0);
       }
     } catch {
-      // Giữ giá trị fallback
+      setPrevMonthExpense(0);
+    }
+
+    if (allTxRes?.success && Array.isArray(allTxRes.data)) {
+      setAllTransactions(allTxRes.data);
     }
   }, [token, currentYear, fetchSummary, fetchTransactions]);
 
@@ -110,20 +116,40 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
     setRefreshing(false);
   };
 
-  // Số dư hiển thị = tổng số dư các ví đang dùng (ví thật từ server); chưa tải được thì dùng số mẫu
-  const baseBalance = 12450000;
-  const currentBalance = activeWallets.length
-    ? activeWallets.reduce((sum, w) => sum + w.balance, 0)
-    : baseBalance + (summary.netCashFlow || 0);
+  const currentTotalWalletBalance = activeWallets.reduce((sum, w) => sum + (w.balance || 0), 0);
 
-  // Chi tiêu và thu nhập: nếu API có số liệu thì dùng, nếu chưa có thì hiển thị số mặc định mockup
-  const usedAmount = summary.totalExpense > 0 ? summary.totalExpense : 3120000;
-  const depositedAmount = summary.totalIncome > 0 ? summary.totalIncome : 15000000;
+  // Số dư tính theo từng tháng:
+  // Lấy tổng số dư ví hiện tại trừ đi biến động ròng của các tháng trong tương lai (sau tháng đang chọn)
+  const currentBalance = useMemo(() => {
+    if (!activeWallets.length) return 0;
+
+    // Thời điểm kết thúc của tháng đang chọn (theo năm hiện tại)
+    const endOfMonth = new Date(currentYear, currentMonthIndex, 0, 23, 59, 59, 999);
+    const endOfMonthTime = endOfMonth.getTime();
+
+    let futureIncome = 0;
+    let futureExpense = 0;
+
+    allTransactions.forEach((t) => {
+      const tTime = t.transactionDate ? new Date(t.transactionDate).getTime() : 0;
+      if (tTime > endOfMonthTime) {
+        if (t.type === 'income') futureIncome += t.amount;
+        if (t.type === 'expense') futureExpense += t.amount;
+      }
+    });
+
+    const futureNet = futureIncome - futureExpense;
+    return Math.max(0, currentTotalWalletBalance - futureNet);
+  }, [activeWallets, currentTotalWalletBalance, allTransactions, currentYear, currentMonthIndex]);
+
+  // Chi tiêu và thu nhập: lấy số thật từ API của tháng đang chọn, mặc định ban đầu là 0
+  const usedAmount = summary.totalExpense || 0;
+  const depositedAmount = summary.totalIncome || 0;
 
   // Tính mức tăng/giảm so với cùng kỳ tháng trước
   const expenseDiff = usedAmount - prevMonthExpense;
   const isIncreased = expenseDiff >= 0;
-  const diffAbs = Math.abs(expenseDiff > 0 ? expenseDiff : 300000);
+  const diffAbs = Math.abs(expenseDiff);
 
   const formatCurrency = (val: number) => {
     return val.toLocaleString('vi-VN');
@@ -249,15 +275,33 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
         useNativeDriver: true,
       }),
     ]).start();
-  }, [activeTab]);
+
+    if (activeTab === 'finance') {
+      loadWallets();
+      loadData(currentMonthIndex);
+      setRefreshKey((k) => k + 1);
+    }
+  }, [activeTab, currentMonthIndex, loadWallets, loadData]);
 
   const renderScreenContent = () => {
     switch (activeTab) {
       case 'payment':
         return (
           <PaymentScreen
-            onBackToHome={() => setActiveTab('finance')}
-            onNavigateToTab={(t) => setActiveTab(t)}
+            onBackToHome={() => {
+              loadWallets();
+              loadData(currentMonthIndex);
+              setRefreshKey((k) => k + 1);
+              setActiveTab('finance');
+            }}
+            onNavigateToTab={(t) => {
+              if (t === 'finance') {
+                loadWallets();
+                loadData(currentMonthIndex);
+                setRefreshKey((k) => k + 1);
+              }
+              setActiveTab(t);
+            }}
             hideBottomBar
           />
         );
@@ -326,22 +370,26 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
               {/* Card: Tổng quan dashboard */}
               <View style={styles.dashboardCard}>
                 <View style={styles.cardHeader}>
-                  <Text style={styles.cardTitle}>Tổng quan dashboard</Text>
+                  <Text style={styles.cardTitle} numberOfLines={1}>Tổng quan dashboard</Text>
 
                   {/* Pill Chọn Tháng */}
                   <View style={styles.monthPill}>
                     <TouchableOpacity
                       onPress={() => setCurrentMonthIndex((m) => Math.max(1, m - 1))}
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      disabled={currentMonthIndex <= 1}
+                      activeOpacity={0.7}
                     >
-                      <ChevronLeft size={16} color="#334155" />
+                      <ChevronLeft size={16} color={currentMonthIndex <= 1 ? '#CBD5E1' : '#334155'} />
                     </TouchableOpacity>
-                    <Text style={styles.monthText}>{`< Tháng ${currentMonthIndex} >`}</Text>
+                    <Text style={styles.monthText} numberOfLines={1}>{`Tháng ${currentMonthIndex}`}</Text>
                     <TouchableOpacity
                       onPress={() => setCurrentMonthIndex((m) => Math.min(12, m + 1))}
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      disabled={currentMonthIndex >= 12}
+                      activeOpacity={0.7}
                     >
-                      <ChevronRight size={16} color="#334155" />
+                      <ChevronRight size={16} color={currentMonthIndex >= 12 ? '#CBD5E1' : '#334155'} />
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -380,36 +428,39 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
               {/* Thanh Pill Trạng thái so sánh */}
               <View style={styles.comparisonPill}>
                 <Text style={styles.comparisonText}>
-                  <Text style={isIncreased ? styles.highlightRed : styles.highlightGreen}>
-                    {isIncreased ? 'Tăng ' : 'Giảm '}
-                    {formatCurrency(diffAbs)}đ
-                  </Text>{' '}
+                  {diffAbs === 0 ? (
+                    <Text style={{ color: '#0F172A', fontWeight: '800' }}>0đ</Text>
+                  ) : (
+                    <Text style={isIncreased ? styles.highlightRed : styles.highlightGreen}>
+                      {isIncreased ? 'Tăng ' : 'Giảm '}
+                      {formatCurrency(diffAbs)}đ
+                    </Text>
+                  )}{' '}
                   so với cùng kì tháng trước
                 </Text>
               </View>
 
-              {/* Hành động ví: Nạp tiền & Chỉnh số dư */}
-              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>
-                <TouchableOpacity
-                  style={[styles.walletActionBtn, { backgroundColor: '#DCFCE7' }]}
-                  onPress={() => {
-                    setTopupSuggest(0);
-                    setTopupVisible(true);
-                  }}
-                  activeOpacity={0.8}
-                  disabled={!defaultWallet}
-                >
-                  <Text style={[styles.walletActionText, { color: '#15803D' }]}>+ Nạp tiền</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.walletActionBtn, { backgroundColor: '#E0F2FE' }]}
-                  onPress={() => setEditBalanceVisible(true)}
-                  activeOpacity={0.8}
-                  disabled={!defaultWallet}
-                >
-                  <Text style={[styles.walletActionText, { color: '#0369A1' }]}>Chỉnh số dư</Text>
-                </TouchableOpacity>
-              </View>
+              {/* Hành động ví: Nạp tiền */}
+              <TouchableOpacity
+                style={[
+                  styles.walletActionBtn,
+                  {
+                    backgroundColor: '#DCFCE7',
+                    flexDirection: 'row',
+                    gap: 8,
+                    marginBottom: 14,
+                  },
+                ]}
+                onPress={() => {
+                  setTopupSuggest(0);
+                  setTopupVisible(true);
+                }}
+                activeOpacity={0.8}
+                disabled={!defaultWallet}
+              >
+                <Plus size={18} color="#15803D" strokeWidth={2.5} />
+                <Text style={[styles.walletActionText, { color: '#15803D' }]}>Nạp tiền vào ví</Text>
+              </TouchableOpacity>
 
               <NetWorthCard token={token || undefined} refreshKey={refreshKey} />
 
@@ -436,16 +487,6 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
                   setTopupVisible(false);
                   setRefreshKey((k) => k + 1);
                   loadData(currentMonthIndex);
-                }}
-              />
-              <EditBalanceModal
-                visible={editBalanceVisible}
-                token={token || undefined}
-                wallet={defaultWallet}
-                onClose={() => setEditBalanceVisible(false)}
-                onSuccess={() => {
-                  setEditBalanceVisible(false);
-                  setRefreshKey((k) => k + 1);
                 }}
               />
 
@@ -540,10 +581,10 @@ const styles = StyleSheet.create({
     maxWidth: 480,
   },
   walletActionBtn: {
-    flex: 1,
     paddingVertical: 12,
     borderRadius: 16,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   walletActionText: {
     fontSize: 14,
@@ -593,25 +634,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 16,
+    gap: 8,
   },
   cardTitle: {
-    fontSize: 18,
+    fontSize: 15,
     fontWeight: '800',
     color: '#000000',
+    flexShrink: 1,
   },
   monthPill: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#F1F5F9',
     borderRadius: 18,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    flexShrink: 0,
+    minWidth: 100,
   },
   monthText: {
     fontSize: 12,
     fontWeight: '700',
     color: '#0F172A',
-    marginHorizontal: 4,
+    marginHorizontal: 3,
+    includeFontPadding: false,
+    textAlign: 'center',
   },
   mainBalanceBox: {
     backgroundColor: '#F0F9FF',

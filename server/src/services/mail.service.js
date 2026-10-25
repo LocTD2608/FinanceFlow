@@ -29,11 +29,16 @@ const maskEmail = (email) => {
   return `${name.charAt(0)}***@${domain}`;
 };
 
-/**
- * Gửi mã OTP thanh toán. Ném lỗi nếu chưa cấu hình hoặc gửi thất bại.
- */
 const sendOtpEmail = async (to, otp, { amount, ttlMinutes = 3 } = {}) => {
   if (!isConfigured()) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('\n====================================================');
+      console.log('🔑 [DEV OTP] SMTP_USER & SMTP_PASS chưa được cấu hình trong server/.env');
+      console.log(`📩 Gửi mã xác nhận tới: ${to}`);
+      console.log(`👉 MÃ OTP THỬ NGHIỆM: [ ${otp} ] (Hiệu lực: ${ttlMinutes} phút)`);
+      console.log('====================================================\n');
+      return { isDev: true, otp };
+    }
     throw new Error('Chưa cấu hình SMTP_USER / SMTP_PASS để gửi email OTP.');
   }
   const amountText = typeof amount === 'number' ? ` cho giao dịch ${amount.toLocaleString('vi-VN')} đ` : '';
@@ -52,6 +57,7 @@ const sendOtpEmail = async (to, otp, { amount, ttlMinutes = 3 } = {}) => {
       `<p>Mã có hiệu lực trong <b>${ttlMinutes} phút</b>. Không chia sẻ mã này với bất kỳ ai.</p>` +
       `</div>`,
   });
+  return { isDev: false };
 };
 
 module.exports = { sendOtpEmail, maskEmail, isConfigured };

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -34,6 +34,7 @@ import {
   MessageSquare,
   Calendar,
   Hash,
+  X,
 } from 'lucide-react-native';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useTransactionStore } from '../../store/useTransactionStore';
@@ -76,6 +77,7 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab, hideBotto
   const [note, setNote] = useState<string>('Thanh toán chi phí khác');
   const [noteError, setNoteError] = useState<boolean>(false);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const isCancelledRef = useRef<boolean>(false);
 
   // OTP Modal State
   const [isOtpModalVisible, setIsOtpModalVisible] = useState<boolean>(false);
@@ -156,9 +158,12 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab, hideBotto
 
   // Huỷ khoản chi: quay về màn đầu, bỏ dữ liệu đang nhập (tiền đã nạp vẫn giữ nguyên)
   const cancelPayment = () => {
+    isCancelledRef.current = true;
+    setIsProcessing(false);
     setIntentId(null);
     setOtpCode('');
     setOtpError('');
+    setIsOtpModalVisible(false);
     setAmount('20.000');
     setNote('Thanh toán chi phí khác');
     setStep('qr');
@@ -178,6 +183,7 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab, hideBotto
 
   const handleOpenOtp = async () => {
     if (isProcessing) return;
+    isCancelledRef.current = false;
     const numericAmount = Number(amount.replace(/[^0-9]/g, ''));
     if (!numericAmount || numericAmount <= 0) {
       Alert.alert('Lỗi', 'Vui lòng nhập số tiền hợp lệ.');
@@ -199,11 +205,16 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab, hideBotto
     });
     setIsProcessing(false);
 
+    // Nếu người dùng đã bấm Hủy trong lúc request đang gửi, không mở modal
+    if (isCancelledRef.current) return;
+
     if (res.success && res.data) {
       setIntentId(res.data.intentId);
       setMaskedEmail(res.data.email);
-      setOtpCode('');
-      setOtpError('');
+      setOtpCode(res.data.devOtp || '');
+      setOtpError(
+        res.data.devOtp ? `[Chế độ thử nghiệm] Đã điền mã: ${res.data.devOtp}` : ''
+      );
       setCountdown(180);
       setResendIn(60);
       setIsOtpModalVisible(true);
@@ -225,8 +236,10 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab, hideBotto
     const res = await paymentApi.resendOtp(token || undefined, intentId);
     setIsProcessing(false);
     if (res.success) {
-      setOtpCode('');
-      setOtpError('');
+      setOtpCode(res.data?.devOtp || '');
+      setOtpError(
+        res.data?.devOtp ? `[Chế độ thử nghiệm] Đã điền mã: ${res.data.devOtp}` : ''
+      );
       setCountdown(180);
       setResendIn(60);
     } else {
@@ -582,16 +595,29 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab, hideBotto
             <View style={styles.card}>
               <Text style={styles.nextStepText}>Bước tiếp theo</Text>
               <TouchableOpacity
-                style={styles.otpActionBtn}
+                style={[styles.otpActionBtn, isProcessing && { opacity: 0.75 }]}
                 onPress={handleOpenOtp}
+                disabled={isProcessing}
                 activeOpacity={0.8}
               >
-                <Text style={styles.otpActionBtnText}>Xác nhận bằng mã OTP</Text>
+                {isProcessing ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                    <Text style={styles.otpActionBtnText}>Đang gửi mã OTP...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.otpActionBtnText}>Xác nhận bằng mã OTP</Text>
+                )}
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.otpActionBtn, { backgroundColor: '#F1F5F9', marginTop: 10 }]}
+                style={[
+                  styles.otpActionBtn,
+                  { backgroundColor: '#F1F5F9', marginTop: 10 },
+                  isProcessing && { opacity: 0.5 },
+                ]}
                 onPress={cancelPayment}
+                disabled={isProcessing}
                 activeOpacity={0.8}
               >
                 <Text style={[styles.otpActionBtnText, { color: '#475569' }]}>Hủy</Text>
@@ -722,6 +748,21 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab, hideBotto
       >
         <View style={styles.modalOverlay}>
           <View style={styles.otpModalBox}>
+            {/* Nút X ở góc trên bên phải */}
+            <TouchableOpacity
+              style={styles.otpModalTopClose}
+              onPress={() => {
+                setIsOtpModalVisible(false);
+                setIntentId(null);
+                setOtpCode('');
+                setOtpError('');
+              }}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              activeOpacity={0.7}
+            >
+              <X size={18} color="#64748B" />
+            </TouchableOpacity>
+
             <Text style={styles.otpModalTitle}>NHẬP MÃ OTP ĐỂ THANH TOÁN</Text>
 
             <View style={styles.otpInputBox}>
@@ -744,7 +785,14 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab, hideBotto
             </Text>
 
             {!!otpError && (
-              <Text style={[styles.otpCountdownText, { color: '#DC2626' }]}>{otpError}</Text>
+              <Text
+                style={[
+                  styles.otpCountdownText,
+                  { color: otpError.includes('thử nghiệm') ? '#0284C7' : '#DC2626' },
+                ]}
+              >
+                {otpError}
+              </Text>
             )}
 
             <TouchableOpacity onPress={handleResendOtp} disabled={resendIn > 0 || isProcessing} activeOpacity={0.7}>
@@ -764,6 +812,20 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab, hideBotto
               ) : (
                 <Text style={styles.otpConfirmBtnText}>Xác nhận</Text>
               )}
+            </TouchableOpacity>
+
+            {/* Nút Đóng bên dưới */}
+            <TouchableOpacity
+              style={styles.otpCloseBtn}
+              onPress={() => {
+                setIsOtpModalVisible(false);
+                setIntentId(null);
+                setOtpCode('');
+                setOtpError('');
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.otpCloseBtnText}>Đóng</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1211,6 +1273,7 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   otpModalBox: {
+    position: 'relative',
     width: '100%',
     backgroundColor: '#FFFFFF',
     borderRadius: 28,
@@ -1221,6 +1284,34 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 24,
     elevation: 8,
+  },
+  otpModalTopClose: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  otpCloseBtn: {
+    width: '100%',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 20,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  otpCloseBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#64748B',
   },
   otpModalTitle: {
     fontSize: 13,
