@@ -45,6 +45,12 @@ const walletSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    // Lưu vết lần user chỉnh số dư trực tiếp (không tạo giao dịch)
+    lastManualAdjustment: {
+      from: { type: Number },
+      to: { type: Number },
+      at: { type: Date },
+    },
   },
   {
     timestamps: true,
