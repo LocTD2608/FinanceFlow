@@ -8,6 +8,7 @@ const categoryRoutes = require('./routes/category.routes');
 const transactionRoutes = require('./routes/transaction.routes');
 const walletRoutes = require('./routes/wallet.routes');
 const budgetRoutes = require('./routes/budget.routes');
+const paymentRoutes = require('./routes/payment.routes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -33,6 +34,9 @@ app.use('/api/wallets', walletRoutes);
 
 // 5. Quản lý ngân sách (Budgets)
 app.use('/api/budgets', budgetRoutes);
+
+// 6. Thanh toán QR có xác thực OTP qua email
+app.use('/api/payments', paymentRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
