@@ -22,6 +22,15 @@ exports.register = async (req, res) => {
     const passwordHash = await bcrypt.hash(password, salt);
 
     const newUser = await User.create({ username, phone, email, passwordHash, authProvider: 'local' });
+
+    // Tạo ví tiền mặt mặc định cho người dùng mới
+    await Wallet.create({
+      userId: newUser._id,
+      name: 'Ví tiền mặt',
+      balance: 0,
+      currency: 'VND',
+    });
+
     const token = jwt.sign({ id: newUser._id, email: newUser.email }, JWT_SECRET, { expiresIn: '7d' });
 
     return res.status(201).json({
@@ -182,5 +191,43 @@ exports.getMe = (req, res) => {
     return res.json({ success: true, user: decoded });
   } catch (err) {
     return res.status(401).json({ success: false, message: 'Token không hợp lệ hoặc đã hết hạn.' });
+  }
+};
+
+// 5. Cập nhật thông tin profile của user
+exports.updateProfile = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.user?._id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Chưa được xác thực.' });
+    }
+
+    const { username, phone, nickname, avatar } = req.body;
+    const updateData = {};
+    if (typeof username === 'string') updateData.username = username.trim();
+    if (typeof phone === 'string') updateData.phone = phone.trim();
+    if (typeof nickname === 'string') updateData.nickname = nickname.trim();
+    if (avatar !== undefined) updateData.avatar = avatar;
+
+    const updatedUser = await User.findByIdAndUpdate(userId, { $set: updateData }, { new: true });
+    if (!updatedUser) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy người dùng.' });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Cập nhật thông tin thành công!',
+      user: {
+        id: updatedUser._id,
+        username: updatedUser.username,
+        email: updatedUser.email,
+        phone: updatedUser.phone || '',
+        avatar: updatedUser.avatar || null,
+        nickname: updatedUser.nickname || '',
+        authProvider: updatedUser.authProvider,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Lỗi server: ' + error.message });
   }
 };

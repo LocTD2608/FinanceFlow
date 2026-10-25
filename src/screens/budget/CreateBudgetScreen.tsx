@@ -13,10 +13,13 @@ import {
   Keyboard,
   Dimensions,
   StatusBar,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   Bell,
+  ChevronLeft,
   Utensils,
   ShoppingBag,
   Car,
@@ -30,19 +33,25 @@ import {
   Check,
 } from 'lucide-react-native';
 import { THEME } from '../../constants/theme';
+import { useAuthStore } from '../../store/useAuthStore';
+import { budgetApi } from '../../api/budget';
 
 const { width } = Dimensions.get('window');
 
 interface Props {
   onBackToFinance?: () => void;
-  onOpenAddModal?: () => void;
+  onNavigateToTab?: (tab: 'finance' | 'payment' | 'cash' | 'save' | 'chart' | 'settings') => void;
+  hideBottomBar?: boolean;
 }
 
 type CategoryType = 'food' | 'shopping' | 'transport' | 'entertainment';
 
-export default function CreateBudgetScreen({ onBackToFinance, onOpenAddModal }: Props) {
+export default function CreateBudgetScreen({ onBackToFinance, onNavigateToTab, hideBottomBar }: Props) {
+  const { token } = useAuthStore();
+
   // State quản lý việc đã kích hoạt ngân sách thành công hay chưa
   const [isSuccess, setIsSuccess] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Form states
   const [amountStr, setAmountStr] = useState('3.500.000');
@@ -75,9 +84,32 @@ export default function CreateBudgetScreen({ onBackToFinance, onOpenAddModal }: 
     }
   };
 
-  const handleActivate = () => {
+  const handleActivate = async () => {
     Keyboard.dismiss();
-    setIsSuccess(true);
+    const numericAmount = Number(amountStr.replace(/[^0-9]/g, ''));
+    if (!numericAmount || numericAmount <= 0) {
+      Alert.alert('Lỗi', 'Vui lòng nhập hạn mức ngân sách hợp lệ (> 0đ).');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const res = await budgetApi.createBudget(token || undefined, {
+        categoryName: getCategoryName(selectedCategory),
+        limitAmount: numericAmount,
+        alertThreshold80: alertEnabled,
+      });
+
+      if (res.success) {
+        setIsSuccess(true);
+      } else {
+        Alert.alert('Thông báo', res.message || 'Không thể tạo ngân sách.');
+      }
+    } catch (err: any) {
+      Alert.alert('Lỗi', err?.message || 'Có lỗi kết nối khi lưu ngân sách.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleEdit = () => {
@@ -100,24 +132,49 @@ export default function CreateBudgetScreen({ onBackToFinance, onOpenAddModal }: 
       >
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={{ flex: 1 }}>
-            {/* Header chung: Tiêu đề "Tạo ngân sách" và Icon Chuông */}
-            <View style={styles.header}>
-              <Text style={styles.headerTitle}>Tạo ngân sách</Text>
-              <TouchableOpacity
-                style={styles.bellBtn}
-                activeOpacity={0.7}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <Bell size={26} color="#0284C7" strokeWidth={2} />
-                <View style={styles.bellDot} />
-              </TouchableOpacity>
-            </View>
-
             <ScrollView
-              contentContainerStyle={styles.scrollContent}
+              contentContainerStyle={styles.scrollContainer}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
+              {/* Top Header Navigation */}
+              <View style={styles.topHeader}>
+                <TouchableOpacity
+                  style={styles.backButton}
+                  onPress={() => {
+                    if (onNavigateToTab) onNavigateToTab('finance');
+                    else if (onBackToFinance) onBackToFinance();
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <ChevronLeft size={20} color="#0F172A" />
+                </TouchableOpacity>
+
+                <View style={styles.headerLinks}>
+                  <View style={styles.headerLinkActiveBox}>
+                    <Text style={styles.headerLinkActive}>Tạo ngân sách</Text>
+                    <View style={styles.activeUnderline} />
+                  </View>
+
+                  <TouchableOpacity
+                    onPress={() => onNavigateToTab && onNavigateToTab('cash')}
+                    activeOpacity={0.7}
+                    style={styles.headerLinkBtn}
+                  >
+                    <Text style={styles.headerLinkInactive}>Thêm/Trừ tiền mặt</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.bellBtn}
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Bell size={24} color="#0284C7" strokeWidth={2} />
+                  <View style={styles.bellDot} />
+                </TouchableOpacity>
+              </View>
+
               {!isSuccess ? (
                 /* ══════════════════════════════════════════════════════════════
                    TRẠNG THÁI 1: FORM TẠO NGÂN SÁCH (ẢNH 1 MOCKUP)
@@ -174,6 +231,7 @@ export default function CreateBudgetScreen({ onBackToFinance, onOpenAddModal }: 
                                 styles.categoryText,
                                 isSelected && styles.categoryTextSelected,
                               ]}
+                              numberOfLines={1}
                             >
                               {cat.name}
                             </Text>
@@ -214,12 +272,19 @@ export default function CreateBudgetScreen({ onBackToFinance, onOpenAddModal }: 
 
                   {/* Nút Kích hoạt ngân sách ➔ */}
                   <TouchableOpacity
-                    style={styles.activateBtn}
+                    style={[styles.activateBtn, isSubmitting && { opacity: 0.7 }]}
                     activeOpacity={0.85}
                     onPress={handleActivate}
+                    disabled={isSubmitting}
                   >
-                    <Text style={styles.activateBtnText}>Kích hoạt ngân sách</Text>
-                    <ArrowRight size={20} color="#FFFFFF" strokeWidth={2.5} />
+                    {isSubmitting ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <>
+                        <Text style={styles.activateBtnText}>Kích hoạt ngân sách</Text>
+                        <ArrowRight size={20} color="#FFFFFF" strokeWidth={2.5} />
+                      </>
+                    )}
                   </TouchableOpacity>
                 </View>
               ) : (
@@ -270,92 +335,82 @@ export default function CreateBudgetScreen({ onBackToFinance, onOpenAddModal }: 
             </ScrollView>
 
             {/* Thanh Floating Bottom Navigation chuẩn thiết kế */}
-            <View style={styles.bottomNavContainer}>
-              <View style={styles.bottomNavBar}>
-                {/* 1. Tài chính */}
-                <TouchableOpacity
-                  style={styles.navItem}
-                  onPress={() => {
-                    if (onBackToFinance) onBackToFinance();
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.navIconCircle}>
-                    <Wallet size={22} color="#64748B" />
-                  </View>
-                  <Text style={styles.navLabel}>Tài chính</Text>
-                </TouchableOpacity>
-
-                {/* 2. Thêm */}
-                <TouchableOpacity
-                  style={styles.navItem}
-                  onPress={() => {
-                    if (onOpenAddModal) onOpenAddModal();
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.navIconCircle}>
-                    <Plus size={22} color="#64748B" />
-                  </View>
-                  <Text style={styles.navLabel}>Thêm</Text>
-                </TouchableOpacity>
-
-                {/* 3. Lưu (Active khi đang ở màn hình ngân sách) */}
-                <TouchableOpacity
-                  style={styles.navItem}
-                  onPress={() => setActiveTab('save')}
-                  activeOpacity={0.7}
-                >
-                  <View
-                    style={[
-                      styles.navIconCircle,
-                      activeTab === 'save' && styles.navIconCircleActive,
-                    ]}
+            {!hideBottomBar && (
+              <View style={styles.bottomNavContainer}>
+                <View style={styles.bottomNavBar}>
+                  {/* 1. Tài chính */}
+                  <TouchableOpacity
+                    style={styles.navItem}
+                    onPress={() => {
+                      if (onNavigateToTab) onNavigateToTab('finance');
+                      else if (onBackToFinance) onBackToFinance();
+                    }}
+                    activeOpacity={0.7}
                   >
-                    <Bookmark
-                      size={22}
-                      color={activeTab === 'save' ? '#0F172A' : '#64748B'}
-                    />
-                  </View>
-                  <Text
-                    style={[
-                      styles.navLabel,
-                      activeTab === 'save' && styles.navLabelActive,
-                    ]}
+                    <View style={styles.navIconCircle}>
+                      <Wallet size={20} color="#64748B" />
+                    </View>
+                    <Text style={styles.navLabel}>Tài chính</Text>
+                  </TouchableOpacity>
+
+                  {/* 2. Thêm */}
+                  <TouchableOpacity
+                    style={styles.navItem}
+                    onPress={() => {
+                      if (onNavigateToTab) onNavigateToTab('cash');
+                    }}
+                    activeOpacity={0.7}
                   >
-                    Lưu
-                  </Text>
-                </TouchableOpacity>
+                    <View style={styles.navIconCircle}>
+                      <Plus size={20} color="#64748B" />
+                    </View>
+                    <Text style={styles.navLabel}>Thêm</Text>
+                  </TouchableOpacity>
 
-                {/* 4. Biểu đồ */}
-                <TouchableOpacity
-                  style={styles.navItem}
-                  onPress={() => {
-                    if (onBackToFinance) onBackToFinance();
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.navIconCircle}>
-                    <BarChart2 size={22} color="#64748B" />
-                  </View>
-                  <Text style={styles.navLabel}>Biểu đồ</Text>
-                </TouchableOpacity>
+                  {/* 3. Lưu (Active khi đang ở màn hình ngân sách) */}
+                  <TouchableOpacity
+                    style={styles.navItem}
+                    onPress={() => {
+                      if (onNavigateToTab) onNavigateToTab('save');
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[styles.navIconCircle, styles.navIconCircleActive]}>
+                      <Bookmark size={20} color="#0F172A" />
+                    </View>
+                    <Text style={[styles.navLabel, styles.navLabelActive]}>Lưu</Text>
+                  </TouchableOpacity>
 
-                {/* 5. Cài đặt */}
-                <TouchableOpacity
-                  style={styles.navItem}
-                  onPress={() => {
-                    if (onBackToFinance) onBackToFinance();
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.navIconCircle}>
-                    <Settings size={22} color="#64748B" />
-                  </View>
-                  <Text style={styles.navLabel}>Cài đặt</Text>
-                </TouchableOpacity>
+                  {/* 4. Biểu đồ */}
+                  <TouchableOpacity
+                    style={styles.navItem}
+                    onPress={() => {
+                      if (onNavigateToTab) onNavigateToTab('chart');
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.navIconCircle}>
+                      <BarChart2 size={20} color="#64748B" />
+                    </View>
+                    <Text style={styles.navLabel}>Biểu đồ</Text>
+                  </TouchableOpacity>
+
+                  {/* 5. Cài đặt */}
+                  <TouchableOpacity
+                    style={styles.navItem}
+                    onPress={() => {
+                      if (onNavigateToTab) onNavigateToTab('settings');
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.navIconCircle}>
+                      <Settings size={20} color="#64748B" />
+                    </View>
+                    <Text style={styles.navLabel}>Cài đặt</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
-            </View>
+            )}
           </View>
         </TouchableWithoutFeedback>
       </KeyboardAvoidingView>
@@ -369,19 +424,57 @@ const styles = StyleSheet.create({
     backgroundColor: '#BAE6FD', // Nền xanh pastel chuẩn toàn app
     paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 28) + 4 : 0,
   },
-  header: {
+  topHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 22,
-    paddingTop: 6,
-    paddingBottom: 14,
+    marginBottom: 16,
   },
-  headerTitle: {
-    fontSize: 26,
-    fontWeight: '900',
-    color: '#000000',
-    letterSpacing: -0.5,
+  backButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  headerLinks: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  headerLinkBtn: {
+    paddingVertical: 4,
+  },
+  headerLinkInactive: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#334155',
+  },
+  headerLinkActiveBox: {
+    position: 'relative',
+    paddingVertical: 4,
+  },
+  headerLinkActive: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  activeUnderline: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 2.5,
+    backgroundColor: '#0F172A',
+    borderRadius: 2,
   },
   bellBtn: {
     position: 'relative',
@@ -396,10 +489,10 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: '#0284C7',
   },
-  scrollContent: {
+  scrollContainer: {
     paddingHorizontal: 16,
+    paddingTop: 12,
     paddingBottom: 110,
-    paddingTop: 4,
   },
   formContainer: {
     gap: 16,
@@ -450,15 +543,16 @@ const styles = StyleSheet.create({
   categoriesGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
+    justifyContent: 'space-between',
+    rowGap: 12,
   },
   categoryItem: {
-    width: (width - 32 - 40 - 12) / 2, // 2 cột đều nhau
+    width: '48.5%', // 2 cột đều nhau, hoàn toàn không bị tràn màn hình
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     paddingVertical: 13,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     borderRadius: 14,
     borderWidth: 1.2,
     borderColor: '#E2E8F0',
@@ -469,9 +563,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#F0F9FF',
   },
   categoryText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
     color: '#0F172A',
+    flexShrink: 1,
   },
   categoryTextSelected: {
     color: '#0284C7',

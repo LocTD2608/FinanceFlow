@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,8 @@ import {
   ScrollView,
   Platform,
   Alert,
+  StatusBar,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -23,30 +25,82 @@ import {
   BarChart2,
   Settings,
 } from 'lucide-react-native';
+import { useAuthStore } from '../../store/useAuthStore';
 
 interface Props {
   onBack?: () => void;
   onLogout?: () => void;
   onNavigateToTab?: (tab: 'finance' | 'payment' | 'cash' | 'save' | 'chart' | 'settings') => void;
+  hideBottomBar?: boolean;
 }
 
 export default function ProfileScreen({
   onBack,
   onLogout,
   onNavigateToTab,
+  hideBottomBar,
 }: Props) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [fullName, setFullName] = useState('HOANG NGOC LIEN');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
+  const { user, updateProfile, logout } = useAuthStore();
 
-  const handleSaveProfile = () => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [fullName, setFullName] = useState(user?.username || 'HOANG NGOC LIEN');
+  const [email, setEmail] = useState(user?.email || '');
+  const [phone, setPhone] = useState(user?.phone || '');
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      if (user.username) setFullName(user.username);
+      if (user.email) setEmail(user.email);
+      if (user.phone) setPhone(user.phone);
+    }
+  }, [user]);
+
+  const initials = useMemo(() => {
+    const parts = fullName.trim().split(/\s+/);
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    }
+    return (fullName.slice(0, 2) || 'FF').toUpperCase();
+  }, [fullName]);
+
+  const handleSaveProfile = async () => {
     if (!fullName.trim()) {
       Alert.alert('Lỗi', 'Họ và tên không được để trống.');
       return;
     }
-    setIsEditing(false);
-    Alert.alert('Thành công', 'Đã lưu thay đổi thông tin cá nhân!');
+    setIsSaving(true);
+    try {
+      const res = await updateProfile({
+        username: fullName.trim(),
+        email: email.trim(),
+        phone: phone.trim(),
+      });
+      if (res.success) {
+        setIsEditing(false);
+        Alert.alert('Thành công', res.message || 'Đã lưu thay đổi thông tin cá nhân!');
+      } else {
+        Alert.alert('Thông báo', res.message || 'Không thể lưu thông tin.');
+      }
+    } catch (err: any) {
+      Alert.alert('Lỗi', err?.message || 'Có lỗi xảy ra khi lưu.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleLogoutPress = () => {
+    Alert.alert('Đăng xuất', 'Bạn có chắc chắn muốn đăng xuất?', [
+      { text: 'Hủy', style: 'cancel' },
+      {
+        text: 'Đăng xuất',
+        style: 'destructive',
+        onPress: async () => {
+          await logout();
+          if (onLogout) onLogout();
+        },
+      },
+    ]);
   };
 
   return (
@@ -84,7 +138,7 @@ export default function ProfileScreen({
             {/* Avatar & Name Card */}
             <View style={styles.profileHeaderCard}>
               <View style={styles.avatarCircle}>
-                <Text style={styles.avatarText}>HL</Text>
+                <Text style={styles.avatarText}>{initials}</Text>
               </View>
 
               <Text style={styles.profileName}>{fullName}</Text>
@@ -149,16 +203,14 @@ export default function ProfileScreen({
               </View>
             </View>
 
-            {/* Nút Đăng xuất */}
-            {onLogout && (
+              {/* Nút Đăng xuất */}
               <TouchableOpacity
                 style={styles.logoutBtn}
-                onPress={onLogout}
+                onPress={handleLogoutPress}
                 activeOpacity={0.7}
               >
                 <Text style={styles.logoutBtnText}>Đăng xuất tài khoản</Text>
               </TouchableOpacity>
-            )}
           </View>
         ) : (
           /* ════════════════════════════════════════════════════════════════
@@ -169,7 +221,7 @@ export default function ProfileScreen({
             <View style={styles.avatarEditCard}>
               <View style={styles.avatarRow}>
                 <View style={styles.avatarCircleSmall}>
-                  <Text style={styles.avatarTextSmall}>HL</Text>
+                  <Text style={styles.avatarTextSmall}>{initials}</Text>
                 </View>
 
                 <TouchableOpacity
@@ -237,12 +289,19 @@ export default function ProfileScreen({
 
             {/* Nút Lưu thay đổi */}
             <TouchableOpacity
-              style={styles.saveBtn}
+              style={[styles.saveBtn, isSaving && { opacity: 0.7 }]}
               onPress={handleSaveProfile}
+              disabled={isSaving}
               activeOpacity={0.8}
             >
-              <Check size={18} color="#FFFFFF" strokeWidth={3} />
-              <Text style={styles.saveBtnText}>Lưu thay đổi</Text>
+              {isSaving ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <>
+                  <Check size={18} color="#FFFFFF" strokeWidth={3} />
+                  <Text style={styles.saveBtnText}>Lưu thay đổi</Text>
+                </>
+              )}
             </TouchableOpacity>
 
             {/* Link Hủy */}
@@ -258,66 +317,68 @@ export default function ProfileScreen({
       </ScrollView>
 
       {/* BOTTOM NAVIGATION BAR */}
-      <View style={styles.bottomNavContainer}>
-        <View style={styles.bottomNavBar}>
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => onNavigateToTab && onNavigateToTab('finance')}
-            activeOpacity={0.7}
-          >
-            <View style={styles.navIconCircle}>
-              <Wallet size={20} color="#64748B" />
-            </View>
-            <Text style={styles.navLabel}>Tài chính</Text>
-          </TouchableOpacity>
+      {!hideBottomBar && (
+        <View style={styles.bottomNavContainer}>
+          <View style={styles.bottomNavBar}>
+            <TouchableOpacity
+              style={styles.navItem}
+              onPress={() => onNavigateToTab && onNavigateToTab('finance')}
+              activeOpacity={0.7}
+            >
+              <View style={styles.navIconCircle}>
+                <Wallet size={20} color="#64748B" />
+              </View>
+              <Text style={styles.navLabel}>Tài chính</Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => onNavigateToTab && onNavigateToTab('cash')}
-            activeOpacity={0.7}
-          >
-            <View style={styles.navIconCircle}>
-              <Plus size={20} color="#64748B" />
-            </View>
-            <Text style={styles.navLabel}>Thêm</Text>
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.navItem}
+              onPress={() => onNavigateToTab && onNavigateToTab('cash')}
+              activeOpacity={0.7}
+            >
+              <View style={styles.navIconCircle}>
+                <Plus size={20} color="#64748B" />
+              </View>
+              <Text style={styles.navLabel}>Thêm</Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => onNavigateToTab && onNavigateToTab('save')}
-            activeOpacity={0.7}
-          >
-            <View style={styles.navIconCircle}>
-              <Bookmark size={20} color="#64748B" />
-            </View>
-            <Text style={styles.navLabel}>Lưu</Text>
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.navItem}
+              onPress={() => onNavigateToTab && onNavigateToTab('save')}
+              activeOpacity={0.7}
+            >
+              <View style={styles.navIconCircle}>
+                <Bookmark size={20} color="#64748B" />
+              </View>
+              <Text style={styles.navLabel}>Lưu</Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => onNavigateToTab && onNavigateToTab('chart')}
-            activeOpacity={0.7}
-          >
-            <View style={styles.navIconCircle}>
-              <BarChart2 size={20} color="#64748B" />
-            </View>
-            <Text style={styles.navLabel}>Biểu đồ</Text>
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.navItem}
+              onPress={() => onNavigateToTab && onNavigateToTab('chart')}
+              activeOpacity={0.7}
+            >
+              <View style={styles.navIconCircle}>
+                <BarChart2 size={20} color="#64748B" />
+              </View>
+              <Text style={styles.navLabel}>Biểu đồ</Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setIsEditing(false)}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.navIconCircle, styles.navIconCircleActive]}>
-              <Settings size={20} color="#0F172A" />
-              {/* Blue dot indicator for Cài đặt */}
-              <View style={styles.activeDot} />
-            </View>
-            <Text style={[styles.navLabel, styles.navLabelActive]}>Cài đặt</Text>
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.navItem}
+              onPress={() => setIsEditing(false)}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.navIconCircle, styles.navIconCircleActive]}>
+                <Settings size={20} color="#0F172A" />
+                {/* Blue dot indicator for Cài đặt */}
+                <View style={styles.activeDot} />
+              </View>
+              <Text style={[styles.navLabel, styles.navLabelActive]}>Cài đặt</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -325,10 +386,11 @@ export default function ProfileScreen({
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#E0F2FE', // Nền xanh cyan pastel chuẩn Figma
+    backgroundColor: '#BAE6FD',
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 28) + 4 : 0,
   },
   scrollContainer: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 110,
   },

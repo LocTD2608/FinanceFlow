@@ -160,4 +160,56 @@ export const authApi = {
       };
     }
   },
+
+  async updateProfile(token: string | undefined, data: Partial<User>): Promise<AuthResponse> {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
+      const res = await fetch(`${API_BASE_URL}/profile`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token && { Authorization: `Bearer ${token}` }),
+        },
+        body: JSON.stringify(data),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      const resData = await res.json();
+      return resData;
+    } catch {
+      // Offline fallback: Cập nhật người dùng trong AsyncStorage
+      const rawUsers = await AsyncStorage.getItem(LOCAL_USERS_KEY);
+      const users: Array<User & { password?: string }> = rawUsers ? JSON.parse(rawUsers) : [];
+      let updatedUser: User | undefined;
+      const newUsers = users.map(u => {
+        if (data.id && u.id === data.id) {
+          updatedUser = { ...u, ...data };
+          return updatedUser;
+        }
+        return u;
+      });
+      if (!updatedUser && users.length > 0) {
+        updatedUser = { ...users[0], ...data };
+        newUsers[0] = updatedUser;
+      }
+      if (!updatedUser) {
+        updatedUser = {
+          id: data.id || 'u_local',
+          username: data.username || 'Người dùng FinanceFlow',
+          email: data.email || 'user@financeflow.vn',
+          phone: data.phone || '',
+          avatar: data.avatar || null,
+          authProvider: 'local',
+        };
+        newUsers.push(updatedUser);
+      }
+      await AsyncStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(newUsers));
+      return {
+        success: true,
+        message: 'Cập nhật thông tin thành công!',
+        user: updatedUser,
+      };
+    }
+  },
 };

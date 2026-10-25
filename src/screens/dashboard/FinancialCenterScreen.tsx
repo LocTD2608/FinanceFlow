@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,8 @@ import {
   RefreshControl,
   Platform,
   StatusBar,
+  Animated,
+  Easing,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path, Line } from 'react-native-svg';
@@ -26,12 +28,12 @@ import {
 import { useAuthStore } from '../../store/useAuthStore';
 import { useTransactionStore } from '../../store/useTransactionStore';
 import { transactionApi } from '../../api/transaction';
-import AddTransactionModal from './AddTransactionModal';
 import CreateBudgetScreen from '../budget/CreateBudgetScreen';
 import PaymentScreen from '../payment/PaymentScreen';
 import CashFlowScreen from '../cash/CashFlowScreen';
 import ExpenseAnalyticsScreen from '../analytics/ExpenseAnalyticsScreen';
 import ProfileScreen from '../profile/ProfileScreen';
+import AnimatedBottomBar from '../../components/navigation/AnimatedBottomBar';
 import { Alert } from 'react-native';
 
 const { width } = Dimensions.get('window');
@@ -50,8 +52,7 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
   const currentYear = new Date().getFullYear();
   // Khởi tạo tháng hiện tại (mặc định lấy tháng thực tế của hệ thống)
   const [currentMonthIndex, setCurrentMonthIndex] = useState(new Date().getMonth() + 1);
-  const [activeTab, setActiveTab] = useState<'finance' | 'payment' | 'cash' | 'add' | 'save' | 'chart' | 'settings'>('finance');
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<'finance' | 'payment' | 'cash' | 'save' | 'chart' | 'settings'>('finance');
   const [refreshing, setRefreshing] = useState(false);
   const [prevMonthExpense, setPrevMonthExpense] = useState<number>(2820000); // Mặc định 2.820.000 để chênh lệch 300.000đ
 
@@ -183,306 +184,276 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
   const innerR = 64;
   const outerR = 120;
 
-  // 1. Màn hình Thanh toán (5 bước chuẩn Figma)
-  if (activeTab === 'payment') {
-    return (
-      <PaymentScreen
-        onBackToHome={() => setActiveTab('finance')}
-        onNavigateToTab={(t) => setActiveTab(t)}
-      />
-    );
-  }
+  // Animation values cho chuyển trang mượt mà
+  const pageOpacity = useRef(new Animated.Value(1)).current;
+  const pageTranslateX = useRef(new Animated.Value(0)).current;
+  const prevTabRef = useRef(activeTab);
 
-  // 2. Màn hình Thêm/Trừ tiền mặt (Image 1 chuẩn Figma)
-  if (activeTab === 'cash') {
-    return (
-      <CashFlowScreen
-        onBack={() => setActiveTab('finance')}
-        onNavigateToBudget={() => setActiveTab('save')}
-        onNavigateToTab={(t) => setActiveTab(t)}
-      />
-    );
-  }
+  const tabOrder: Record<string, number> = {
+    finance: 0,
+    cash: 1,
+    save: 2,
+    chart: 3,
+    settings: 4,
+    payment: 5,
+  };
 
-  // 3. Màn hình Tạo ngân sách (chuẩn mockup)
-  if (activeTab === 'save') {
-    return (
-      <>
-        <CreateBudgetScreen
-          onBackToFinance={() => setActiveTab('finance')}
-          onOpenAddModal={() => setIsAddModalOpen(true)}
-        />
-        <AddTransactionModal
-          visible={isAddModalOpen}
-          onClose={() => setIsAddModalOpen(false)}
-          onSuccess={() => {
-            loadData(currentMonthIndex);
-          }}
-        />
-      </>
-    );
-  }
+  useEffect(() => {
+    if (prevTabRef.current === activeTab) return;
 
-  // 4. Màn hình Biểu đồ & Xếp hạng chi tiêu (Image 2 chuẩn Figma)
-  if (activeTab === 'chart') {
-    return (
-      <>
-        <ExpenseAnalyticsScreen
-          onBack={() => setActiveTab('finance')}
-          onOpenAddModal={() => setIsAddModalOpen(true)}
-          onNavigateToTab={(t) => setActiveTab(t)}
-        />
-        <AddTransactionModal
-          visible={isAddModalOpen}
-          onClose={() => setIsAddModalOpen(false)}
-          onSuccess={() => {
-            loadData(currentMonthIndex);
-          }}
-        />
-      </>
-    );
-  }
+    const prevIdx = tabOrder[prevTabRef.current] ?? 0;
+    const currIdx = tabOrder[activeTab] ?? 0;
+    prevTabRef.current = activeTab;
 
-  // 5. Màn hình Hồ sơ cá nhân & Cài đặt (Image 3 chuẩn Figma)
-  if (activeTab === 'settings') {
-    return (
-      <ProfileScreen
-        onBack={() => setActiveTab('finance')}
-        onLogout={onLogout}
-        onNavigateToTab={(t) => setActiveTab(t)}
-      />
-    );
-  }
+    // Trượt từ phải sang nếu tiến tới tab tiếp theo, trượt từ trái sang nếu lùi lại
+    const enterFrom = currIdx >= prevIdx ? 24 : -24;
+
+    pageTranslateX.setValue(enterFrom);
+    pageOpacity.setValue(0.2);
+
+    Animated.parallel([
+      Animated.timing(pageOpacity, {
+        toValue: 1,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.spring(pageTranslateX, {
+        toValue: 0,
+        friction: 8,
+        tension: 70,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [activeTab]);
+
+  const renderScreenContent = () => {
+    switch (activeTab) {
+      case 'payment':
+        return (
+          <PaymentScreen
+            onBackToHome={() => setActiveTab('finance')}
+            onNavigateToTab={(t) => setActiveTab(t)}
+            hideBottomBar
+          />
+        );
+
+      case 'cash':
+        return (
+          <CashFlowScreen
+            onBack={() => setActiveTab('finance')}
+            onNavigateToBudget={() => setActiveTab('save')}
+            onNavigateToTab={(t) => setActiveTab(t)}
+            hideBottomBar
+          />
+        );
+
+      case 'save':
+        return (
+          <CreateBudgetScreen
+            onBackToFinance={() => setActiveTab('finance')}
+            onNavigateToTab={(t) => setActiveTab(t)}
+            hideBottomBar
+          />
+        );
+
+      case 'chart':
+        return (
+          <ExpenseAnalyticsScreen
+            onBack={() => setActiveTab('finance')}
+            onNavigateToTab={(t) => setActiveTab(t)}
+            hideBottomBar
+          />
+        );
+
+      case 'settings':
+        return (
+          <ProfileScreen
+            onBack={() => setActiveTab('finance')}
+            onLogout={onLogout}
+            onNavigateToTab={(t) => setActiveTab(t)}
+            hideBottomBar
+          />
+        );
+
+      case 'finance':
+      default:
+        return (
+          <SafeAreaView style={styles.safeArea}>
+            <StatusBar barStyle="dark-content" backgroundColor="#BAE6FD" />
+            <ScrollView
+              contentContainerStyle={styles.scrollContainer}
+              showsVerticalScrollIndicator={false}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={onRefresh}
+                  colors={['#0284C7']}
+                  tintColor="#0284C7"
+                />
+              }
+            >
+              {/* Header với Tiêu đề & Mascot Gấu Trúc/Gấu Bông */}
+              <View style={styles.headerWrapper}>
+                <Text style={styles.screenTitle}>Trung tâm tài chính</Text>
+                <Image source={MASCOT_IMG} style={styles.mascotImage} resizeMode="contain" />
+              </View>
+
+              {/* Card: Tổng quan dashboard */}
+              <View style={styles.dashboardCard}>
+                <View style={styles.cardHeader}>
+                  <Text style={styles.cardTitle}>Tổng quan dashboard</Text>
+
+                  {/* Pill Chọn Tháng */}
+                  <View style={styles.monthPill}>
+                    <TouchableOpacity
+                      onPress={() => setCurrentMonthIndex((m) => Math.max(1, m - 1))}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <ChevronLeft size={16} color="#334155" />
+                    </TouchableOpacity>
+                    <Text style={styles.monthText}>{`< Tháng ${currentMonthIndex} >`}</Text>
+                    <TouchableOpacity
+                      onPress={() => setCurrentMonthIndex((m) => Math.min(12, m + 1))}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <ChevronRight size={16} color="#334155" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Ô Lớn: Số tiền hiện tại */}
+                <View style={styles.mainBalanceBox}>
+                  <Text style={styles.mainBalanceLabel}>Số tiền hiện tại</Text>
+                  <View style={styles.amountRow}>
+                    <Text style={styles.currencySymbol}>đ</Text>
+                    <Text style={styles.mainBalanceAmount}>{formatCurrency(currentBalance)}</Text>
+                  </View>
+                </View>
+
+                {/* Hàng 2 Ô: Số tiền đã sử dụng & Tổng tiền nạp vào */}
+                <View style={styles.twoColsRow}>
+                  {/* Box Trái */}
+                  <View style={styles.statBox}>
+                    <Text style={styles.statLabel}>Số tiền đã sử dụng</Text>
+                    <View style={styles.amountRowSmall}>
+                      <Text style={styles.currencySymbolSmall}>đ</Text>
+                      <Text style={styles.statAmount}>{formatCurrency(usedAmount)}</Text>
+                    </View>
+                  </View>
+
+                  {/* Box Phải */}
+                  <View style={styles.statBox}>
+                    <Text style={styles.statLabel}>Tổng tiền nạp vào</Text>
+                    <View style={styles.amountRowSmall}>
+                      <Text style={styles.currencySymbolSmall}>đ</Text>
+                      <Text style={styles.statAmount}>{formatCurrency(depositedAmount)}</Text>
+                    </View>
+                  </View>
+                </View>
+              </View>
+
+              {/* Thanh Pill Trạng thái so sánh */}
+              <View style={styles.comparisonPill}>
+                <Text style={styles.comparisonText}>
+                  <Text style={isIncreased ? styles.highlightRed : styles.highlightGreen}>
+                    {isIncreased ? 'Tăng ' : 'Giảm '}
+                    {formatCurrency(diffAbs)}đ
+                  </Text>{' '}
+                  so với cùng kì tháng trước
+                </Text>
+              </View>
+
+              {/* Nút hành động nhanh: Quét QR & Thanh toán */}
+              <TouchableOpacity
+                style={styles.quickPayBanner}
+                onPress={() => setActiveTab('payment')}
+                activeOpacity={0.8}
+              >
+                <View style={styles.quickPayIconBox}>
+                  <QrCode size={20} color="#0284C7" />
+                </View>
+                <View style={styles.quickPayTextContainer}>
+                  <Text style={styles.quickPayTitle}>Quét mã QR thanh toán</Text>
+                  <Text style={styles.quickPaySubtitle}>Chuyển tiền & phân loại tự động vào ngân sách</Text>
+                </View>
+                <ChevronRight size={18} color="#64748B" />
+              </TouchableOpacity>
+
+              {/* Biểu đồ Donut Chart trung tâm */}
+              <View style={styles.chartSection}>
+                <Svg width={300} height={300} viewBox="0 0 300 300">
+                  {/* 1. Mảng Trắng (Ăn uống): 0° đến 65° */}
+                  <Path d={describeDonutArc(cx, cy, innerR, outerR, 0, 65)} fill="#FFFFFF" />
+
+                  {/* 2. Mảng Xanh Lam Đậm (Khác): 65° đến 125° */}
+                  <Path d={describeDonutArc(cx, cy, innerR, outerR, 65, 125)} fill="#4379F2" />
+
+                  {/* 3. Mảng Xanh Biển Nhạt: 125° đến 210° */}
+                  <Path d={describeDonutArc(cx, cy, innerR, outerR, 125, 210)} fill="#67E8F9" />
+
+                  {/* 4. Mảng Xanh Biển Trung: 210° đến 280° */}
+                  <Path d={describeDonutArc(cx, cy, innerR, outerR, 210, 280)} fill="#38BDF8" />
+
+                  {/* 5. Mảng Xanh Biển Đậm Vừa: 280° đến 360° */}
+                  <Path d={describeDonutArc(cx, cy, innerR, outerR, 280, 360)} fill="#22D3EE" />
+
+                  {/* Vạch chỉ hướng (Leader lines) */}
+                  <Line x1={200} y1={95} x2={230} y2={95} stroke="#0F172A" strokeWidth={1.5} />
+                  <Line x1={235} y1={155} x2={250} y2={155} stroke="#0F172A" strokeWidth={1.5} />
+                  <Line x1={202} y1={235} x2={246} y2={235} stroke="#0F172A" strokeWidth={1.5} />
+                  <Line x1={24} y1={218} x2={70} y2={218} stroke="#0F172A" strokeWidth={1.5} />
+                  <Line x1={62} y1={100} x2={98} y2={100} stroke="#0F172A" strokeWidth={1.5} />
+                </Svg>
+
+                {/* Nhãn chữ nổi (Labels) với tỷ lệ phần trăm động */}
+                <Text style={[styles.chartLabel, styles.labelAnUong]}>
+                  Ăn uống ({foodPercent}%)
+                </Text>
+                <Text style={[styles.chartLabel, styles.labelKhac]}>
+                  Khác ({otherPercent}%)
+                </Text>
+              </View>
+            </ScrollView>
+          </SafeAreaView>
+        );
+    }
+  };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" backgroundColor="#BAE6FD" />
-      <ScrollView
-        contentContainerStyle={styles.scrollContainer}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={['#0284C7']}
-            tintColor="#0284C7"
-          />
-        }
+    <View style={styles.mainContainer}>
+      <Animated.View
+        style={[
+          styles.screenAnimatedWrapper,
+          {
+            opacity: pageOpacity,
+            transform: [{ translateX: pageTranslateX }],
+          },
+        ]}
       >
-        {/* Header với Tiêu đề & Mascot Gấu Trúc/Gấu Bông */}
-        <View style={styles.headerWrapper}>
-          <Text style={styles.screenTitle}>Trung tâm tài chính</Text>
-          <Image source={MASCOT_IMG} style={styles.mascotImage} resizeMode="contain" />
-        </View>
+        {renderScreenContent()}
+      </Animated.View>
 
-        {/* Card: Tổng quan dashboard */}
-        <View style={styles.dashboardCard}>
-          <View style={styles.cardHeader}>
-            <Text style={styles.cardTitle}>Tổng quan dashboard</Text>
-
-            {/* Pill Chọn Tháng */}
-            <View style={styles.monthPill}>
-              <TouchableOpacity
-                onPress={() => setCurrentMonthIndex((m) => Math.max(1, m - 1))}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <ChevronLeft size={16} color="#334155" />
-              </TouchableOpacity>
-              <Text style={styles.monthText}>{`< Tháng ${currentMonthIndex} >`}</Text>
-              <TouchableOpacity
-                onPress={() => setCurrentMonthIndex((m) => Math.min(12, m + 1))}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <ChevronRight size={16} color="#334155" />
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Ô Lớn: Số tiền hiện tại */}
-          <View style={styles.mainBalanceBox}>
-            <Text style={styles.mainBalanceLabel}>Số tiền hiện tại</Text>
-            <View style={styles.amountRow}>
-              <Text style={styles.currencySymbol}>đ</Text>
-              <Text style={styles.mainBalanceAmount}>{formatCurrency(currentBalance)}</Text>
-            </View>
-          </View>
-
-          {/* Hàng 2 Ô: Số tiền đã sử dụng & Tổng tiền nạp vào */}
-          <View style={styles.twoColsRow}>
-            {/* Box Trái */}
-            <View style={styles.statBox}>
-              <Text style={styles.statLabel}>Số tiền đã sử dụng</Text>
-              <View style={styles.amountRowSmall}>
-                <Text style={styles.currencySymbolSmall}>đ</Text>
-                <Text style={styles.statAmount}>{formatCurrency(usedAmount)}</Text>
-              </View>
-            </View>
-
-            {/* Box Phải */}
-            <View style={styles.statBox}>
-              <Text style={styles.statLabel}>Tổng tiền nạp vào</Text>
-              <View style={styles.amountRowSmall}>
-                <Text style={styles.currencySymbolSmall}>đ</Text>
-                <Text style={styles.statAmount}>{formatCurrency(depositedAmount)}</Text>
-              </View>
-            </View>
-          </View>
-        </View>
-
-        {/* Thanh Pill Trạng thái so sánh */}
-        <View style={styles.comparisonPill}>
-          <Text style={styles.comparisonText}>
-            <Text style={isIncreased ? styles.highlightRed : styles.highlightGreen}>
-              {isIncreased ? 'Tăng ' : 'Giảm '}
-              {formatCurrency(diffAbs)}đ
-            </Text>{' '}
-            so với cùng kì tháng trước
-          </Text>
-        </View>
-
-        {/* Nút hành động nhanh: Quét QR & Thanh toán */}
-        <TouchableOpacity
-          style={styles.quickPayBanner}
-          onPress={() => setActiveTab('payment')}
-          activeOpacity={0.8}
-        >
-          <View style={styles.quickPayIconBox}>
-            <QrCode size={20} color="#0284C7" />
-          </View>
-          <View style={styles.quickPayTextContainer}>
-            <Text style={styles.quickPayTitle}>Quét mã QR thanh toán</Text>
-            <Text style={styles.quickPaySubtitle}>Chuyển tiền & phân loại tự động vào ngân sách</Text>
-          </View>
-          <ChevronRight size={18} color="#64748B" />
-        </TouchableOpacity>
-
-        {/* Biểu đồ Donut Chart trung tâm */}
-        <View style={styles.chartSection}>
-          <Svg width={300} height={300} viewBox="0 0 300 300">
-            {/* 1. Mảng Trắng (Ăn uống): 0° đến 65° */}
-            <Path d={describeDonutArc(cx, cy, innerR, outerR, 0, 65)} fill="#FFFFFF" />
-
-            {/* 2. Mảng Xanh Lam Đậm (Khác): 65° đến 125° */}
-            <Path d={describeDonutArc(cx, cy, innerR, outerR, 65, 125)} fill="#4379F2" />
-
-            {/* 3. Mảng Xanh Biển Nhạt: 125° đến 210° */}
-            <Path d={describeDonutArc(cx, cy, innerR, outerR, 125, 210)} fill="#67E8F9" />
-
-            {/* 4. Mảng Xanh Biển Trung: 210° đến 280° */}
-            <Path d={describeDonutArc(cx, cy, innerR, outerR, 210, 280)} fill="#38BDF8" />
-
-            {/* 5. Mảng Xanh Biển Đậm Vừa: 280° đến 360° */}
-            <Path d={describeDonutArc(cx, cy, innerR, outerR, 280, 360)} fill="#22D3EE" />
-
-            {/* Vạch chỉ hướng (Leader lines) */}
-            <Line x1={200} y1={95} x2={230} y2={95} stroke="#0F172A" strokeWidth={1.5} />
-            <Line x1={235} y1={155} x2={250} y2={155} stroke="#0F172A" strokeWidth={1.5} />
-            <Line x1={202} y1={235} x2={246} y2={235} stroke="#0F172A" strokeWidth={1.5} />
-            <Line x1={24} y1={218} x2={70} y2={218} stroke="#0F172A" strokeWidth={1.5} />
-            <Line x1={62} y1={100} x2={98} y2={100} stroke="#0F172A" strokeWidth={1.5} />
-          </Svg>
-
-          {/* Nhãn chữ nổi (Labels) với tỷ lệ phần trăm động */}
-          <Text style={[styles.chartLabel, styles.labelAnUong]}>
-            Ăn uống ({foodPercent}%)
-          </Text>
-          <Text style={[styles.chartLabel, styles.labelKhac]}>
-            Khác ({otherPercent}%)
-          </Text>
-        </View>
-      </ScrollView>
-
-      {/* Thanh Bottom Navigation chuẩn mockup (Viên thuốc trắng bo tròn) */}
-      <View style={styles.bottomNavContainer}>
-        <View style={styles.bottomNavBar}>
-          {/* 1. Tài chính */}
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setActiveTab('finance')}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.navIconCircle, styles.navIconCircleActive]}>
-              <Wallet size={22} color="#0F172A" />
-            </View>
-            <Text style={[styles.navLabel, styles.navLabelActive]}>
-              Tài chính
-            </Text>
-          </TouchableOpacity>
-
-          {/* 2. Thêm */}
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setActiveTab('cash')}
-            activeOpacity={0.7}
-          >
-            <View style={styles.navIconCircle}>
-              <Plus size={22} color="#64748B" />
-            </View>
-            <Text style={styles.navLabel}>
-              Thêm
-            </Text>
-          </TouchableOpacity>
-
-          {/* 3. Lưu */}
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setActiveTab('cash')}
-            activeOpacity={0.7}
-          >
-            <View style={styles.navIconCircle}>
-              <Bookmark size={22} color="#64748B" />
-            </View>
-            <Text style={styles.navLabel}>
-              Lưu
-            </Text>
-          </TouchableOpacity>
-
-          {/* 4. Biểu đồ */}
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setActiveTab('chart')}
-            activeOpacity={0.7}
-          >
-            <View style={styles.navIconCircle}>
-              <BarChart2 size={22} color="#64748B" />
-            </View>
-            <Text style={styles.navLabel}>
-              Biểu đồ
-            </Text>
-          </TouchableOpacity>
-
-          {/* 5. Cài đặt */}
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setActiveTab('settings')}
-            activeOpacity={0.7}
-          >
-            <View style={styles.navIconCircle}>
-              <Settings size={22} color="#64748B" />
-            </View>
-            <Text style={styles.navLabel}>
-              Cài đặt
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Modal Thêm giao dịch */}
-      <AddTransactionModal
-        visible={isAddModalOpen}
-        onClose={() => {
-          setIsAddModalOpen(false);
-          setActiveTab('finance');
-        }}
-        onSuccess={() => {
-          loadData(currentMonthIndex);
-        }}
+      {/* Persistent Animated Bottom Navigation Bar với hiệu ứng di chuyển màu trượt mượt mà */}
+      <AnimatedBottomBar
+        activeTab={activeTab}
+        onSelectTab={(tab) => setActiveTab(tab)}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  mainContainer: {
+    flex: 1,
+    backgroundColor: '#BAE6FD',
+    alignItems: 'center',
+  },
+  screenAnimatedWrapper: {
+    flex: 1,
+    width: '100%',
+    maxWidth: 480,
+  },
   safeArea: {
     flex: 1,
     backgroundColor: '#BAE6FD',
@@ -497,7 +468,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-between',
-    paddingHorizontal: 8,
+    paddingHorizontal: 4,
     marginBottom: 8,
   },
   screenTitle: {
@@ -514,7 +485,7 @@ const styles = StyleSheet.create({
   },
   dashboardCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 28,
+    borderRadius: 24,
     padding: 18,
     shadowColor: '#0284C7',
     shadowOffset: { width: 0, height: 6 },

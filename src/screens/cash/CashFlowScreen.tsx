@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,10 @@ import {
   Platform,
   Dimensions,
   Alert,
+  Animated,
+  LayoutChangeEvent,
+  StatusBar,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -27,6 +31,9 @@ import {
   BarChart2,
   Settings,
 } from 'lucide-react-native';
+import { useAuthStore } from '../../store/useAuthStore';
+import { useTransactionStore } from '../../store/useTransactionStore';
+import { walletApi } from '../../api/wallet';
 
 const { width } = Dimensions.get('window');
 
@@ -34,6 +41,7 @@ interface Props {
   onBack?: () => void;
   onNavigateToBudget?: () => void;
   onNavigateToTab?: (tab: 'finance' | 'payment' | 'cash' | 'save' | 'chart' | 'settings') => void;
+  hideBottomBar?: boolean;
 }
 
 type CashFlowMode = 'in' | 'out'; // 'in': Thêm tiền mặt, 'out': Trừ tiền mặt
@@ -56,7 +64,11 @@ export default function CashFlowScreen({
   onBack,
   onNavigateToBudget,
   onNavigateToTab,
+  hideBottomBar,
 }: Props) {
+  const { token } = useAuthStore();
+  const { createTransaction } = useTransactionStore();
+
   const [mode, setMode] = useState<CashFlowMode>('in');
   const [selectedCategory, setSelectedCategory] = useState<string>('other');
   const [amountIn, setAmountIn] = useState<string>('500.000');
@@ -64,21 +76,67 @@ export default function CashFlowScreen({
   const [dateStr, setDateStr] = useState<string>('18/10/2026');
   const [noteIn, setNoteIn] = useState<string>('Tiền mặt dự phòng cá nhân');
   const [noteOut, setNoteOut] = useState<string>('Thanh toán bữa trưa');
-  const [hasError, setHasError] = useState<boolean>(true); // Theo đúng Figma: hiển thị cảnh báo ghi chú
+  const [hasError, setHasError] = useState<boolean>(false);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  const handleSubmit = () => {
+  // Animation trượt mượt mà cho nút Toggle (Thêm tiền mặt vs Trừ tiền mặt)
+  const toggleAnim = useRef(new Animated.Value(0)).current;
+  const [toggleBarWidth, setToggleBarWidth] = useState(0);
+
+  useEffect(() => {
+    Animated.spring(toggleAnim, {
+      toValue: mode === 'in' ? 0 : 1,
+      friction: 7,
+      tension: 65,
+      useNativeDriver: false,
+    }).start();
+  }, [mode, toggleAnim]);
+
+  const handleSubmit = async () => {
     const currentNote = mode === 'in' ? noteIn : noteOut;
     if (!currentNote.trim()) {
       setHasError(true);
       return;
     }
-    const actionName = mode === 'in' ? 'Thêm tiền mặt' : 'Trừ tiền mặt';
-    const amountVal = mode === 'in' ? `+${amountIn}đ` : `-${amountOut}đ`;
-    Alert.alert(
-      'Thành công',
-      `${actionName} thành công: ${amountVal}\nGhi chú: ${currentNote}`,
-      [{ text: 'OK', onPress: onBack }]
-    );
+    setHasError(false);
+
+    const rawAmount = mode === 'in' ? amountIn : amountOut;
+    const numericAmount = Number(rawAmount.replace(/[^0-9]/g, ''));
+    if (!numericAmount || numericAmount <= 0) {
+      Alert.alert('Lỗi', 'Vui lòng nhập số tiền hợp lệ (> 0đ).');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      // Lấy ví tiền mặt của người dùng hoặc dùng fallback mặc định
+      const defaultWallet = await walletApi.getDefaultWallet(token || undefined);
+      const walletId = defaultWallet?._id || defaultWallet?.id || 'w_cash_default';
+
+      const result = await createTransaction(token || undefined, {
+        amount: numericAmount,
+        type: mode === 'in' ? 'income' : 'expense',
+        walletId,
+        note: currentNote.trim(),
+        transactionDate: new Date().toISOString(),
+      });
+
+      if (result.success) {
+        const actionName = mode === 'in' ? 'Thêm tiền mặt' : 'Trừ tiền mặt';
+        const amountVal = mode === 'in' ? `+${numericAmount.toLocaleString('vi-VN')}đ` : `-${numericAmount.toLocaleString('vi-VN')}đ`;
+        Alert.alert(
+          'Thành công',
+          `${actionName} thành công: ${amountVal}\nGhi chú: ${currentNote.trim()}`,
+          [{ text: 'OK', onPress: onBack }]
+        );
+      } else {
+        Alert.alert('Thông báo', result.message || 'Không thể ghi nhận giao dịch.');
+      }
+    } catch (err: any) {
+      Alert.alert('Lỗi', err?.message || 'Có lỗi kết nối máy chủ.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -100,7 +158,7 @@ export default function CashFlowScreen({
 
           <View style={styles.headerLinks}>
             <TouchableOpacity
-              onPress={onNavigateToBudget}
+              onPress={() => onNavigateToTab ? onNavigateToTab('save') : onNavigateToBudget && onNavigateToBudget()}
               activeOpacity={0.7}
               style={styles.headerLinkBtn}
             >
@@ -114,13 +172,37 @@ export default function CashFlowScreen({
           </View>
         </View>
 
-        {/* Toggle Switcher: Thêm tiền mặt vs Trừ tiền mặt */}
-        <View style={styles.toggleContainer}>
+        {/* Toggle Switcher: Thêm tiền mặt vs Trừ tiền mặt với hiệu ứng trượt màu */}
+        <View
+          style={styles.toggleContainer}
+          onLayout={(e: LayoutChangeEvent) => setToggleBarWidth(e.nativeEvent.layout.width)}
+        >
+          {toggleBarWidth > 0 && (
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.slidingTogglePill,
+                {
+                  width: (toggleBarWidth - 8) / 2,
+                  transform: [
+                    {
+                      translateX: toggleAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [4, 4 + (toggleBarWidth - 8) / 2],
+                      }),
+                    },
+                  ],
+                  backgroundColor: toggleAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: ['#86EFAC', '#FCA5A5'],
+                  }),
+                },
+              ]}
+            />
+          )}
+
           <TouchableOpacity
-            style={[
-              styles.toggleBtn,
-              mode === 'in' && styles.toggleBtnInActive,
-            ]}
+            style={styles.toggleBtn}
             onPress={() => setMode('in')}
             activeOpacity={0.8}
           >
@@ -135,10 +217,7 @@ export default function CashFlowScreen({
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[
-              styles.toggleBtn,
-              mode === 'out' && styles.toggleBtnOutActive,
-            ]}
+            style={styles.toggleBtn}
             onPress={() => setMode('out')}
             activeOpacity={0.8}
           >
@@ -280,75 +359,82 @@ export default function CashFlowScreen({
 
         {/* NÚT SUBMIT CHÍNH */}
         <TouchableOpacity
-          style={styles.submitBtn}
+          style={[styles.submitBtn, isSubmitting && { opacity: 0.7 }]}
           onPress={handleSubmit}
+          disabled={isSubmitting}
           activeOpacity={0.8}
         >
-          <Text style={styles.submitBtnText}>
-            {mode === 'in' ? '+ Lưu tiền mặt' : 'Xác nhận'}
-          </Text>
+          {isSubmitting ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Text style={styles.submitBtnText}>
+              {mode === 'in' ? '+ Lưu tiền mặt' : 'Xác nhận'}
+            </Text>
+          )}
         </TouchableOpacity>
       </ScrollView>
 
       {/* BOTTOM NAVIGATION BAR */}
-      <View style={styles.bottomNavContainer}>
-        <View style={styles.bottomNavBar}>
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => onNavigateToTab && onNavigateToTab('finance')}
-            activeOpacity={0.7}
-          >
-            <View style={styles.navIconCircle}>
-              <Wallet size={20} color="#64748B" />
-            </View>
-            <Text style={styles.navLabel}>Tài chính</Text>
-          </TouchableOpacity>
+      {!hideBottomBar && (
+        <View style={styles.bottomNavContainer}>
+          <View style={styles.bottomNavBar}>
+            <TouchableOpacity
+              style={styles.navItem}
+              onPress={() => onNavigateToTab && onNavigateToTab('finance')}
+              activeOpacity={0.7}
+            >
+              <View style={styles.navIconCircle}>
+                <Wallet size={20} color="#64748B" />
+              </View>
+              <Text style={styles.navLabel}>Tài chính</Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setMode('in')}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.navIconCircle, styles.navIconCircleActive]}>
-              <Plus size={20} color="#0F172A" />
-            </View>
-            <Text style={[styles.navLabel, styles.navLabelActive]}>Thêm</Text>
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.navItem}
+              onPress={() => onNavigateToTab && onNavigateToTab('cash')}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.navIconCircle, styles.navIconCircleActive]}>
+                <Plus size={20} color="#0F172A" />
+              </View>
+              <Text style={[styles.navLabel, styles.navLabelActive]}>Thêm</Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => onNavigateToBudget && onNavigateToBudget()}
-            activeOpacity={0.7}
-          >
-            <View style={styles.navIconCircle}>
-              <Bookmark size={20} color="#64748B" />
-            </View>
-            <Text style={styles.navLabel}>Lưu</Text>
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.navItem}
+              onPress={() => onNavigateToTab ? onNavigateToTab('save') : onNavigateToBudget && onNavigateToBudget()}
+              activeOpacity={0.7}
+            >
+              <View style={styles.navIconCircle}>
+                <Bookmark size={20} color="#64748B" />
+              </View>
+              <Text style={styles.navLabel}>Lưu</Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => onNavigateToTab && onNavigateToTab('chart')}
-            activeOpacity={0.7}
-          >
-            <View style={styles.navIconCircle}>
-              <BarChart2 size={20} color="#64748B" />
-            </View>
-            <Text style={styles.navLabel}>Biểu đồ</Text>
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.navItem}
+              onPress={() => onNavigateToTab && onNavigateToTab('chart')}
+              activeOpacity={0.7}
+            >
+              <View style={styles.navIconCircle}>
+                <BarChart2 size={20} color="#64748B" />
+              </View>
+              <Text style={styles.navLabel}>Biểu đồ</Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => onNavigateToTab && onNavigateToTab('settings')}
-            activeOpacity={0.7}
-          >
-            <View style={styles.navIconCircle}>
-              <Settings size={20} color="#64748B" />
-            </View>
-            <Text style={styles.navLabel}>Cài đặt</Text>
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.navItem}
+              onPress={() => onNavigateToTab && onNavigateToTab('settings')}
+              activeOpacity={0.7}
+            >
+              <View style={styles.navIconCircle}>
+                <Settings size={20} color="#64748B" />
+              </View>
+              <Text style={styles.navLabel}>Cài đặt</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -356,10 +442,11 @@ export default function CashFlowScreen({
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#E0F2FE', // Nền xanh cyan pastel chuẩn Figma
+    backgroundColor: '#BAE6FD',
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 28) + 4 : 0,
   },
   scrollContainer: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 110,
   },
@@ -414,11 +501,24 @@ const styles = StyleSheet.create({
     borderRadius: 2,
   },
   toggleContainer: {
+    position: 'relative',
     flexDirection: 'row',
     backgroundColor: '#BAE6FD',
     borderRadius: 16,
     padding: 4,
     marginBottom: 16,
+  },
+  slidingTogglePill: {
+    position: 'absolute',
+    top: 4,
+    bottom: 4,
+    left: 0,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
   toggleBtn: {
     flex: 1,
@@ -542,15 +642,16 @@ const styles = StyleSheet.create({
   categoryGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    justifyContent: 'space-between',
+    rowGap: 10,
   },
   categoryBtn: {
-    width: (width - 40 - 32 - 10) / 2,
+    width: '48.5%', // 2 cột cân đối, không phụ thuộc Dimensions và không tràn màn hình
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 12,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     borderRadius: 16,
     borderWidth: 1.5,
     borderColor: '#E2E8F0',
@@ -566,12 +667,14 @@ const styles = StyleSheet.create({
   categoryContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
+    flexShrink: 1,
   },
   categoryLabel: {
     fontSize: 13,
     fontWeight: '700',
     color: '#0F172A',
+    flexShrink: 1,
   },
   categoryLabelSelected: {
     color: '#0284C7',

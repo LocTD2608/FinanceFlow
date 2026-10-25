@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   ScrollView,
   Platform,
   Dimensions,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -27,6 +28,8 @@ import {
   BarChart2,
   Settings,
 } from 'lucide-react-native';
+import { useAuthStore } from '../../store/useAuthStore';
+import { useTransactionStore } from '../../store/useTransactionStore';
 
 const { width } = Dimensions.get('window');
 
@@ -34,6 +37,7 @@ interface Props {
   onBack?: () => void;
   onOpenAddModal?: () => void;
   onNavigateToTab?: (tab: 'finance' | 'payment' | 'cash' | 'save' | 'chart' | 'settings') => void;
+  hideBottomBar?: boolean;
 }
 
 type AnalyticsView = 'list' | 'rank_expense' | 'rank_category';
@@ -117,34 +121,86 @@ export default function ExpenseAnalyticsScreen({
   onBack,
   onOpenAddModal,
   onNavigateToTab,
+  hideBottomBar,
 }: Props) {
+  const { token } = useAuthStore();
+  const { transactions, fetchTransactions } = useTransactionStore();
+
   const [viewMode, setViewMode] = useState<AnalyticsView>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('Tất cả');
   const [paymentFilter, setPaymentFilter] = useState('Tất cả');
+
+  useEffect(() => {
+    fetchTransactions(token || undefined);
+  }, [token, fetchTransactions]);
+
+  const activeExpenses: ExpenseItem[] = useMemo(() => {
+    const expenseList = transactions.filter((t) => t.type === 'expense');
+    if (expenseList.length === 0) return SAMPLE_EXPENSES;
+
+    return expenseList.map((t) => {
+      const catObj = typeof t.categoryId === 'object' && t.categoryId ? (t.categoryId as any) : null;
+      const catName = catObj?.name || 'Chi tiêu';
+      let icon = MoreHorizontal;
+      let catKey = 'other';
+      const lower = (catName + ' ' + (t.note || '')).toLowerCase();
+      if (lower.includes('ăn') || lower.includes('uống') || lower.includes('cơm') || lower.includes('food')) {
+        icon = Utensils;
+        catKey = 'food';
+      } else if (lower.includes('mua') || lower.includes('sắm') || lower.includes('quần') || lower.includes('áo') || lower.includes('shop')) {
+        icon = ShoppingBag;
+        catKey = 'shopping';
+      } else if (lower.includes('xe') || lower.includes('taxi') || lower.includes('di chuyển') || lower.includes('xăng')) {
+        icon = Car;
+        catKey = 'transport';
+      } else if (lower.includes('phim') || lower.includes('giải trí') || lower.includes('game')) {
+        icon = Film;
+        catKey = 'entertainment';
+      }
+
+      const txDate = t.transactionDate ? new Date(t.transactionDate) : new Date();
+      const dateFormatted = `${String(txDate.getDate()).padStart(2, '0')}/${String(txDate.getMonth() + 1).padStart(2, '0')}/${txDate.getFullYear()}`;
+
+      return {
+        id: t._id || t.id || String(Math.random()),
+        title: t.note || catName,
+        category: catKey,
+        categoryName: catName,
+        icon,
+        date: dateFormatted,
+        amount: t.amount,
+        paymentMethod: (t.receiptImageUrl ? 'qr' : 'cash') as 'qr' | 'cash',
+      };
+    });
+  }, [transactions]);
 
   const formatCurrency = (val: number) => {
     return val.toLocaleString('vi-VN') + 'đ';
   };
 
   // Tính tổng số tiền và số lượng
-  const totalAmount = 2000000;
-  const totalCount = SAMPLE_EXPENSES.length;
+  const totalAmount = useMemo(() => {
+    return activeExpenses.reduce((sum, item) => sum + item.amount, 0);
+  }, [activeExpenses]);
+
+  const totalCount = activeExpenses.length;
 
   // Lọc chi tiêu theo tìm kiếm
   const filteredExpenses = useMemo(() => {
-    return SAMPLE_EXPENSES.filter((item) => {
+    return activeExpenses.filter((item) => {
       const matchSearch =
         item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
         item.categoryName.toLowerCase().includes(searchQuery.toLowerCase());
       return matchSearch;
     });
-  }, [searchQuery]);
+  }, [activeExpenses, searchQuery]);
 
   // Nhóm theo ngày cho View Mode: List
   const groupedDates = useMemo(() => {
-    const dates = ['18/10/2026', '17/10/2026', '16/10/2026'];
-    return dates.map((d) => {
+    const uniqueDates = Array.from(new Set(filteredExpenses.map((e) => e.date)));
+    if (uniqueDates.length === 0) return [];
+    return uniqueDates.map((d) => {
       const items = filteredExpenses.filter((e) => e.date === d);
       const subtotal = items.reduce((sum, cur) => sum + cur.amount, 0);
       return { date: d, items, subtotal };
@@ -153,57 +209,40 @@ export default function ExpenseAnalyticsScreen({
 
   // Xếp hạng chi tiêu từ cao đến thấp
   const rankedExpenses = useMemo(() => {
-    return [...SAMPLE_EXPENSES].sort((a, b) => b.amount - a.amount);
-  }, []);
+    return [...activeExpenses].sort((a, b) => b.amount - a.amount);
+  }, [activeExpenses]);
 
   // Xếp hạng danh mục từ cao đến thấp
-  const rankedCategories = [
-    {
-      id: '1',
-      name: 'Mua sắm',
-      icon: ShoppingBag,
-      txCount: 1,
-      amount: 800000,
-      percent: 40,
-      color: '#0284C7',
-    },
-    {
-      id: '2',
-      name: 'Ăn uống',
-      icon: Utensils,
-      txCount: 2,
-      amount: 700000,
-      percent: 35,
-      color: '#38BDF8',
-    },
-    {
-      id: '3',
-      name: 'Giải trí',
-      icon: Film,
-      txCount: 1,
-      amount: 250000,
-      percent: 12.5,
-      color: '#7DD3FC',
-    },
-    {
-      id: '4',
-      name: 'Di chuyển',
-      icon: Car,
-      txCount: 1,
-      amount: 150000,
-      percent: 7.5,
-      color: '#BAE6FD',
-    },
-    {
-      id: '5',
-      name: 'Khác',
-      icon: MoreHorizontal,
-      txCount: 1,
-      amount: 100000,
-      percent: 5,
-      color: '#E2E8F0',
-    },
-  ];
+  const rankedCategories = useMemo(() => {
+    const catMap = new Map<string, { id: string; name: string; icon: any; txCount: number; amount: number; color: string }>();
+    const colors = ['#0284C7', '#38BDF8', '#7DD3FC', '#BAE6FD', '#E2E8F0', '#94A3B8'];
+
+    activeExpenses.forEach((item) => {
+      const existing = catMap.get(item.categoryName);
+      if (existing) {
+        existing.txCount += 1;
+        existing.amount += item.amount;
+      } else {
+        catMap.set(item.categoryName, {
+          id: item.category,
+          name: item.categoryName,
+          icon: item.icon,
+          txCount: 1,
+          amount: item.amount,
+          color: colors[catMap.size % colors.length],
+        });
+      }
+    });
+
+    const list = Array.from(catMap.values());
+    list.sort((a, b) => b.amount - a.amount);
+
+    return list.map((c, idx) => ({
+      ...c,
+      color: colors[idx % colors.length],
+      percent: totalAmount > 0 ? Math.round((c.amount / totalAmount) * 1000) / 10 : 0,
+    }));
+  }, [activeExpenses, totalAmount]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -278,7 +317,10 @@ export default function ExpenseAnalyticsScreen({
             <View style={styles.actionRow}>
               <TouchableOpacity
                 style={styles.addExpenseAction}
-                onPress={onOpenAddModal}
+                onPress={() => {
+                  if (onNavigateToTab) onNavigateToTab('cash');
+                  else if (onOpenAddModal) onOpenAddModal();
+                }}
                 activeOpacity={0.7}
               >
                 <Plus size={16} color="#0284C7" />
@@ -517,64 +559,66 @@ export default function ExpenseAnalyticsScreen({
       </ScrollView>
 
       {/* BOTTOM NAVIGATION BAR */}
-      <View style={styles.bottomNavContainer}>
-        <View style={styles.bottomNavBar}>
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => onNavigateToTab && onNavigateToTab('finance')}
-            activeOpacity={0.7}
-          >
-            <View style={styles.navIconCircle}>
-              <Wallet size={20} color="#64748B" />
-            </View>
-            <Text style={styles.navLabel}>Tài chính</Text>
-          </TouchableOpacity>
+      {!hideBottomBar && (
+        <View style={styles.bottomNavContainer}>
+          <View style={styles.bottomNavBar}>
+            <TouchableOpacity
+              style={styles.navItem}
+              onPress={() => onNavigateToTab && onNavigateToTab('finance')}
+              activeOpacity={0.7}
+            >
+              <View style={styles.navIconCircle}>
+                <Wallet size={20} color="#64748B" />
+              </View>
+              <Text style={styles.navLabel}>Tài chính</Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => onNavigateToTab && onNavigateToTab('cash')}
-            activeOpacity={0.7}
-          >
-            <View style={styles.navIconCircle}>
-              <Plus size={20} color="#64748B" />
-            </View>
-            <Text style={styles.navLabel}>Thêm</Text>
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.navItem}
+              onPress={() => onNavigateToTab && onNavigateToTab('cash')}
+              activeOpacity={0.7}
+            >
+              <View style={styles.navIconCircle}>
+                <Plus size={20} color="#64748B" />
+              </View>
+              <Text style={styles.navLabel}>Thêm</Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => onNavigateToTab && onNavigateToTab('save')}
-            activeOpacity={0.7}
-          >
-            <View style={styles.navIconCircle}>
-              <Bookmark size={20} color="#64748B" />
-            </View>
-            <Text style={styles.navLabel}>Lưu</Text>
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.navItem}
+              onPress={() => onNavigateToTab && onNavigateToTab('save')}
+              activeOpacity={0.7}
+            >
+              <View style={styles.navIconCircle}>
+                <Bookmark size={20} color="#64748B" />
+              </View>
+              <Text style={styles.navLabel}>Lưu</Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setViewMode('list')}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.navIconCircle, styles.navIconCircleActive]}>
-              <BarChart2 size={20} color="#0F172A" />
-            </View>
-            <Text style={[styles.navLabel, styles.navLabelActive]}>Biểu đồ</Text>
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.navItem}
+              onPress={() => setViewMode('list')}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.navIconCircle, styles.navIconCircleActive]}>
+                <BarChart2 size={20} color="#0F172A" />
+              </View>
+              <Text style={[styles.navLabel, styles.navLabelActive]}>Biểu đồ</Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => onNavigateToTab && onNavigateToTab('settings')}
-            activeOpacity={0.7}
-          >
-            <View style={styles.navIconCircle}>
-              <Settings size={20} color="#64748B" />
-            </View>
-            <Text style={styles.navLabel}>Cài đặt</Text>
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.navItem}
+              onPress={() => onNavigateToTab && onNavigateToTab('settings')}
+              activeOpacity={0.7}
+            >
+              <View style={styles.navIconCircle}>
+                <Settings size={20} color="#64748B" />
+              </View>
+              <Text style={styles.navLabel}>Cài đặt</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -582,10 +626,11 @@ export default function ExpenseAnalyticsScreen({
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#E0F2FE', // Nền xanh cyan pastel chuẩn Figma
+    backgroundColor: '#BAE6FD',
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 28) + 4 : 0,
   },
   scrollContainer: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 110,
   },

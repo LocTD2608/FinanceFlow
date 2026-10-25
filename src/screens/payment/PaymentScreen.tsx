@@ -11,6 +11,8 @@ import {
   Platform,
   Share,
   Alert,
+  StatusBar,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Rect, Path, G } from 'react-native-svg';
@@ -33,12 +35,16 @@ import {
   Calendar,
   Hash,
 } from 'lucide-react-native';
+import { useAuthStore } from '../../store/useAuthStore';
+import { useTransactionStore } from '../../store/useTransactionStore';
+import { walletApi } from '../../api/wallet';
 
 const { width } = Dimensions.get('window');
 
 interface Props {
   onBackToHome?: () => void;
   onNavigateToTab?: (tab: 'finance' | 'payment' | 'cash' | 'save' | 'chart' | 'settings') => void;
+  hideBottomBar?: boolean;
 }
 
 type PaymentStep = 'qr' | 'input' | 'confirm' | 'success';
@@ -57,12 +63,16 @@ const CATEGORIES: CategoryItem[] = [
   { id: 'other', label: 'Khác', icon: MoreHorizontal },
 ];
 
-export default function PaymentScreen({ onBackToHome, onNavigateToTab }: Props) {
+export default function PaymentScreen({ onBackToHome, onNavigateToTab, hideBottomBar }: Props) {
+  const { token } = useAuthStore();
+  const { createTransaction, summary } = useTransactionStore();
+
   const [step, setStep] = useState<PaymentStep>('qr');
   const [selectedCategory, setSelectedCategory] = useState<string>('other');
   const [amount, setAmount] = useState<string>('20.000');
   const [note, setNote] = useState<string>('Thanh toán chi phí khác');
   const [noteError, setNoteError] = useState<boolean>(false);
+  const [isProcessing, setIsProcessing] = useState<boolean>(false);
 
   // OTP Modal State
   const [isOtpModalVisible, setIsOtpModalVisible] = useState<boolean>(false);
@@ -97,9 +107,27 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab }: Props) 
     setIsOtpModalVisible(true);
   };
 
-  const handleConfirmOtp = () => {
-    setIsOtpModalVisible(false);
-    setStep('success');
+  const handleConfirmOtp = async () => {
+    setIsProcessing(true);
+    try {
+      const numericAmount = Number(amount.replace(/[^0-9]/g, ''));
+      const defaultWallet = await walletApi.getDefaultWallet(token || undefined);
+      const walletId = defaultWallet?._id || defaultWallet?.id || 'w_cash_default';
+
+      await createTransaction(token || undefined, {
+        amount: numericAmount > 0 ? numericAmount : 20000,
+        type: 'expense',
+        walletId,
+        note: `Thanh toán: ${note.trim() || 'Thanh toán QR'}`,
+        transactionDate: new Date().toISOString(),
+      });
+    } catch {
+      // offline / catch
+    } finally {
+      setIsProcessing(false);
+      setIsOtpModalVisible(false);
+      setStep('success');
+    }
   };
 
   const handleShare = async () => {
@@ -137,7 +165,9 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab }: Props) 
               <Text style={styles.balanceLabel}>Số dư</Text>
               <View style={styles.balanceRow}>
                 <Text style={styles.currencySymbol}>đ</Text>
-                <Text style={styles.balanceAmount}>30.000</Text>
+                <Text style={styles.balanceAmount}>
+                  {Math.max(0, 30000 + (summary.netCashFlow || 0)).toLocaleString('vi-VN')}
+                </Text>
                 <View style={styles.cursorBar} />
               </View>
             </View>
@@ -558,11 +588,16 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab }: Props) 
             </Text>
 
             <TouchableOpacity
-              style={styles.otpConfirmBtn}
+              style={[styles.otpConfirmBtn, isProcessing && { opacity: 0.7 }]}
               onPress={handleConfirmOtp}
+              disabled={isProcessing}
               activeOpacity={0.8}
             >
-              <Text style={styles.otpConfirmBtnText}>Xác nhận</Text>
+              {isProcessing ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.otpConfirmBtnText}>Xác nhận</Text>
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -618,7 +653,7 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab }: Props) 
       {/* ==============================================================
           BOTTOM NAVIGATION BAR (Đồng bộ chuẩn Figma)
       ============================================================== */}
-      {step !== 'success' && (
+      {!hideBottomBar && step !== 'success' && (
         <View style={styles.bottomNavContainer}>
           <View style={styles.bottomNavBar}>
             <TouchableOpacity
@@ -637,18 +672,18 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab }: Props) 
 
             <TouchableOpacity
               style={styles.navItem}
-              onPress={() => setStep('qr')}
+              onPress={() => onNavigateToTab ? onNavigateToTab('cash') : setStep('qr')}
               activeOpacity={0.7}
             >
-              <View style={[styles.navIconCircle, styles.navIconCircleActive]}>
-                <Plus size={20} color="#0F172A" />
+              <View style={styles.navIconCircle}>
+                <Plus size={20} color="#64748B" />
               </View>
-              <Text style={[styles.navLabel, styles.navLabelActive]}>Thêm</Text>
+              <Text style={styles.navLabel}>Thêm</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               style={styles.navItem}
-              onPress={() => onNavigateToTab && onNavigateToTab('cash')}
+              onPress={() => onNavigateToTab && onNavigateToTab('save')}
               activeOpacity={0.7}
             >
               <View style={styles.navIconCircle}>
@@ -688,10 +723,11 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab }: Props) 
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#E0F2FE', // Nền xanh cyan pastel chuẩn Figma
+    backgroundColor: '#BAE6FD',
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 28) + 4 : 0,
   },
   scrollContainer: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 110,
   },
@@ -705,9 +741,9 @@ const styles = StyleSheet.create({
     height: 44,
   },
   backButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
@@ -802,15 +838,16 @@ const styles = StyleSheet.create({
   categoryGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    justifyContent: 'space-between',
+    rowGap: 10,
   },
   categoryBtn: {
-    width: (width - 40 - 36 - 10) / 2,
+    width: '48.5%', // 2 cột cân đối, không phụ thuộc Dimensions và không tràn màn hình
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     paddingVertical: 12,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     borderRadius: 16,
     backgroundColor: '#F8FAFC',
     borderWidth: 1.5,
@@ -827,6 +864,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#1E293B',
+    flexShrink: 1,
   },
   categoryLabelActive: {
     color: '#0284C7',

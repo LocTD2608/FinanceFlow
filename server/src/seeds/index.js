@@ -8,6 +8,8 @@
  */
 
 require('dotenv').config();
+const dns = require('dns');
+dns.setServers(['8.8.8.8', '1.1.1.1']);
 const mongoose = require('mongoose');
 
 const Category        = require('../models/Category');
@@ -64,10 +66,26 @@ async function seedDemoData(categoryMap) {
 
   const { user, wallets, transactions, budgets, billReminders, netWorthSnapshot } = await getDemoData(categoryMap);
 
-  // 1. Tạo user
+  // 1. Tạo user demo
   const createdUser = await User.create(user);
   const userId = createdUser._id;
   log.success(`Đã tạo user demo: ${createdUser.email}`);
+
+  // 1b. Tạo thêm user Admin
+  const existingAdmin = await User.findOne({ email: 'admin@financeflow.vn' });
+  if (existingAdmin) {
+    await User.deleteOne({ _id: existingAdmin._id });
+  }
+  const bcrypt = require('bcryptjs');
+  const adminPasswordHash = await bcrypt.hash('admin123', 10);
+  await User.create({
+    email: 'admin@financeflow.vn',
+    passwordHash: adminPasswordHash,
+    username: 'Admin FinanceFlow',
+    nickname: 'Admin',
+    phone: '0988888888',
+  });
+  log.success('Đã tạo user admin: admin@financeflow.vn (Mật khẩu: admin123)');
 
   // 2. Tạo wallets
   const walletDocs = await Wallet.insertMany(wallets.map(w => ({ ...w, userId })));
