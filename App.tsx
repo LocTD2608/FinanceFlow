@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, LogBox } from 'react-native';
+
+// Bỏ qua cảnh báo thông báo đẩy của Expo Go trên Android để không hiện thanh vàng
+LogBox.ignoreLogs(['[expo-notifications]']);
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuthStore } from './src/store/useAuthStore';
