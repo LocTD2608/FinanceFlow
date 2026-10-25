@@ -31,6 +31,15 @@ const billReminderSchema = new mongoose.Schema(
       enum: ['pending', 'paid'],
       default: 'pending',
     },
+    // Các mốc đã gửi thông báo cho kỳ hiện tại: 'd-3', 'd-1', 'd0', 'overdue' (tránh gửi trùng)
+    notifiedStages: {
+      type: [String],
+      default: [],
+    },
+    paidAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,
