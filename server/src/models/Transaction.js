@@ -49,6 +49,11 @@ const transactionSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // Khóa chống trùng khi retry (bấm đúp, mất mạng gửi lại). Chỉ duy nhất theo user khi có giá trị.
+    idempotencyKey: {
+      type: String,
+      trim: true,
+    },
   },
   {
     timestamps: true,
@@ -60,5 +65,9 @@ const transactionSchema = new mongoose.Schema(
 transactionSchema.index({ userId: 1, transactionDate: -1 }); // Hiển thị giao dịch gần nhất
 transactionSchema.index({ userId: 1, categoryId: 1, transactionDate: -1 }); // Tính ngân sách & biểu đồ
 transactionSchema.index({ userId: 1, amount: -1 }); // Top khoản chi lớn nhất
+transactionSchema.index(
+  { userId: 1, idempotencyKey: 1 },
+  { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } }
+);
 
 module.exports = mongoose.model('Transaction', transactionSchema);

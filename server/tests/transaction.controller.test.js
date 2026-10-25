@@ -18,6 +18,7 @@ jest.mock('../src/models/Wallet', () => ({
   findOne: jest.fn(),
   findById: jest.fn(),
   findByIdAndUpdate: jest.fn(),
+  findOneAndUpdate: jest.fn(),
   updateOne: jest.fn(),
 }));
 
@@ -150,7 +151,7 @@ describe('create transaction & balance updates', () => {
     const category = makeCategory({ type: 'expense' });
     Wallet.findOne.mockResolvedValue(sourceWallet);
     Category.findOne.mockResolvedValue(category);
-    Wallet.findByIdAndUpdate.mockResolvedValue({ ...sourceWallet, balance: 950000 });
+    Wallet.findOneAndUpdate.mockResolvedValue({ ...sourceWallet, balance: 950000 });
     Transaction.create.mockResolvedValue(makeTransaction({ amount: 50000, type: 'expense' }));
 
     const res = mockRes();
@@ -168,9 +169,9 @@ describe('create transaction & balance updates', () => {
     );
 
     expect(res.status).toHaveBeenCalledWith(201);
-    // Kiểm tra Wallet.findByIdAndUpdate được gọi với $inc: { balance: -50000 }
-    expect(Wallet.findByIdAndUpdate).toHaveBeenCalledWith(
-      WALLET_ID,
+    // Khoản trừ là cập nhật có điều kiện: ví thường phải còn đủ số dư
+    expect(Wallet.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: WALLET_ID, $or: [{ type: 'credit_card' }, { balance: { $gte: 50000 } }] },
       { $inc: { balance: -50000 } },
       { new: true }
     );
@@ -255,9 +256,8 @@ describe('create transaction & balance updates', () => {
       .mockResolvedValueOnce(sourceWallet)
       .mockResolvedValueOnce(destWallet);
 
-    Wallet.findByIdAndUpdate
-      .mockResolvedValueOnce({ ...sourceWallet, balance: 1500000 })
-      .mockResolvedValueOnce({ ...destWallet, balance: 1000000 });
+    Wallet.findByIdAndUpdate.mockResolvedValueOnce({ ...destWallet, balance: 1000000 });
+    Wallet.findOneAndUpdate.mockResolvedValueOnce({ ...sourceWallet, balance: 1500000 });
 
     Transaction.create.mockResolvedValue(
       makeTransaction({
@@ -283,18 +283,290 @@ describe('create transaction & balance updates', () => {
     );
 
     expect(res.status).toHaveBeenCalledWith(201);
-    expect(Wallet.findByIdAndUpdate).toHaveBeenNthCalledWith(
-      1,
-      WALLET_ID,
-      { $inc: { balance: -500000 } },
-      { new: true }
-    );
-    expect(Wallet.findByIdAndUpdate).toHaveBeenNthCalledWith(
-      2,
+    // Khoản cộng (ví đích) được áp trước, khoản trừ (ví nguồn) là cập nhật có điều kiện
+    expect(Wallet.findByIdAndUpdate).toHaveBeenCalledWith(
       DEST_WALLET_ID,
       { $inc: { balance: 500000 } },
       { new: true }
     );
+    expect(Wallet.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: WALLET_ID, $or: [{ type: 'credit_card' }, { balance: { $gte: 500000 } }] },
+      { $inc: { balance: -500000 } },
+      { new: true }
+    );
+  });
+});
+
+// ──────────────────────────────────────────────
+// 1b. KIỂM TRA SỐ DƯ (không âm, trừ credit_card)
+// ──────────────────────────────────────────────
+describe('kiểm tra số dư khi chi / chuyển khoản', () => {
+  const expenseBody = (amount) => ({
+    amount,
+    type: 'expense',
+    walletId: WALLET_ID,
+    categoryId: CAT_EXPENSE_ID,
+  });
+
+  it('ví thường không đủ tiền -> 400 INSUFFICIENT_BALANCE kèm shortfall, không ghi giao dịch', async () => {
+    Wallet.findOne.mockResolvedValue(makeWallet({ balance: 200000 }));
+    Category.findOne.mockResolvedValue(makeCategory());
+
+    const res = mockRes();
+    await ctrl.create(mockReq({ body: expenseBody(500000) }), res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(body(res)).toMatchObject({
+      success: false,
+      code: 'INSUFFICIENT_BALANCE',
+      currentBalance: 200000,
+      requiredAmount: 500000,
+      shortfall: 300000,
+    });
+    expect(Wallet.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(Transaction.create).not.toHaveBeenCalled();
+  });
+
+  it('chi đúng bằng số dư thì được (số dư về 0)', async () => {
+    Wallet.findOne.mockResolvedValue(makeWallet({ balance: 50000 }));
+    Category.findOne.mockResolvedValue(makeCategory());
+    Wallet.findOneAndUpdate.mockResolvedValue(makeWallet({ balance: 0 }));
+    Transaction.create.mockResolvedValue(makeTransaction({ amount: 50000 }));
+
+    const res = mockRes();
+    await ctrl.create(mockReq({ body: expenseBody(50000) }), res);
+
+    expect(res.status).toHaveBeenCalledWith(201);
+  });
+
+  it('gọi đồng thời: ví bị rút trước khiến cập nhật có điều kiện thất bại -> 400 INSUFFICIENT_BALANCE', async () => {
+    Wallet.findOne.mockResolvedValue(makeWallet({ balance: 100000 }));
+    Category.findOne.mockResolvedValue(makeCategory());
+    Wallet.findOneAndUpdate.mockResolvedValue(null); // điều kiện $gte không còn thỏa
+    Wallet.findById.mockResolvedValue(makeWallet({ balance: 10000 }));
+
+    const res = mockRes();
+    await ctrl.create(mockReq({ body: expenseBody(80000) }), res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(body(res)).toMatchObject({ code: 'INSUFFICIENT_BALANCE', currentBalance: 10000, shortfall: 70000 });
+    expect(Transaction.create).not.toHaveBeenCalled();
+  });
+
+  it('chuyển khoản vượt số dư ví nguồn -> 400 INSUFFICIENT_BALANCE', async () => {
+    Wallet.findOne
+      .mockResolvedValueOnce(makeWallet({ balance: 100000 }))
+      .mockResolvedValueOnce(makeWallet({ _id: DEST_WALLET_ID }));
+
+    const res = mockRes();
+    await ctrl.create(
+      mockReq({
+        body: { amount: 300000, type: 'transfer', walletId: WALLET_ID, destinationWalletId: DEST_WALLET_ID },
+      }),
+      res
+    );
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(body(res).code).toBe('INSUFFICIENT_BALANCE');
+    expect(Wallet.findByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('thu nhập không bị kiểm tra số dư', async () => {
+    Wallet.findOne.mockResolvedValue(makeWallet({ balance: 0 }));
+    Category.findOne.mockResolvedValue(makeCategory({ _id: CAT_INCOME_ID, type: 'income', name: 'Lương' }));
+    Wallet.findByIdAndUpdate.mockResolvedValue(makeWallet({ balance: 1000 }));
+    Transaction.create.mockResolvedValue(makeTransaction({ type: 'income' }));
+
+    const res = mockRes();
+    await ctrl.create(
+      mockReq({ body: { amount: 1000, type: 'income', walletId: WALLET_ID, categoryId: CAT_INCOME_ID } }),
+      res
+    );
+
+    expect(res.status).toHaveBeenCalledWith(201);
+  });
+
+  it('ví credit_card được chi vượt số dư (về âm), không báo thiếu số dư', async () => {
+    Wallet.findOne.mockResolvedValue(makeWallet({ type: 'credit_card', balance: 0 }));
+    Category.findOne.mockResolvedValue(makeCategory());
+    Wallet.findOneAndUpdate.mockResolvedValue(makeWallet({ type: 'credit_card', balance: -700000 }));
+    Transaction.create.mockResolvedValue(makeTransaction({ amount: 700000 }));
+
+    const res = mockRes();
+    await ctrl.create(mockReq({ body: expenseBody(700000) }), res);
+
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(Wallet.findOneAndUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ $or: expect.arrayContaining([{ type: 'credit_card' }]) }),
+      { $inc: { balance: -700000 } },
+      { new: true }
+    );
+  });
+
+  it('lưu giao dịch lỗi thì hoàn tác số dư đã trừ', async () => {
+    Wallet.findOne.mockResolvedValue(makeWallet({ balance: 1000000 }));
+    Category.findOne.mockResolvedValue(makeCategory());
+    Wallet.findOneAndUpdate.mockResolvedValue(makeWallet());
+    Wallet.findByIdAndUpdate.mockResolvedValue(makeWallet());
+    Transaction.create.mockRejectedValue(new Error('db lỗi'));
+
+    const res = mockRes();
+    await ctrl.create(mockReq({ body: expenseBody(50000) }), res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(Wallet.findByIdAndUpdate).toHaveBeenCalledWith(
+      WALLET_ID,
+      { $inc: { balance: 50000 } },
+      { new: true }
+    );
+  });
+});
+
+// ──────────────────────────────────────────────
+// 1c. DANH MỤC "KHÁC" BẮT BUỘC GHI CHÚ
+// ──────────────────────────────────────────────
+describe('danh mục "Khác" bắt buộc ghi chú', () => {
+  const otherExpense = () => makeCategory({ name: 'Khác (Chi)' });
+  const otherIncome = () => makeCategory({ _id: CAT_INCOME_ID, type: 'income', name: 'Khác (Thu)' });
+
+  beforeEach(() => {
+    Wallet.findOne.mockResolvedValue(makeWallet());
+    Wallet.findOneAndUpdate.mockResolvedValue(makeWallet());
+    Wallet.findByIdAndUpdate.mockResolvedValue(makeWallet());
+    Transaction.create.mockResolvedValue(makeTransaction());
+  });
+
+  it('chi "Khác" không có ghi chú -> 400', async () => {
+    Category.findOne.mockResolvedValue(otherExpense());
+    const res = mockRes();
+    await ctrl.create(
+      mockReq({ body: { amount: 1000, type: 'expense', walletId: WALLET_ID, categoryId: CAT_EXPENSE_ID } }),
+      res
+    );
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(body(res).message).toMatch(/ghi chú/i);
+    expect(Transaction.create).not.toHaveBeenCalled();
+  });
+
+  it('chi "Khác" ghi chú toàn khoảng trắng -> 400', async () => {
+    Category.findOne.mockResolvedValue(otherExpense());
+    const res = mockRes();
+    await ctrl.create(
+      mockReq({ body: { amount: 1000, type: 'expense', walletId: WALLET_ID, categoryId: CAT_EXPENSE_ID, note: '   ' } }),
+      res
+    );
+    expect(res.status).toHaveBeenCalledWith(400);
+  });
+
+  it('thu "Khác" không có ghi chú -> 400', async () => {
+    Category.findOne.mockResolvedValue(otherIncome());
+    const res = mockRes();
+    await ctrl.create(
+      mockReq({ body: { amount: 1000, type: 'income', walletId: WALLET_ID, categoryId: CAT_INCOME_ID } }),
+      res
+    );
+    expect(res.status).toHaveBeenCalledWith(400);
+  });
+
+  it('"Khác" ghi chú quá 50 ký tự -> 400', async () => {
+    Category.findOne.mockResolvedValue(otherExpense());
+    const res = mockRes();
+    await ctrl.create(
+      mockReq({
+        body: { amount: 1000, type: 'expense', walletId: WALLET_ID, categoryId: CAT_EXPENSE_ID, note: 'a'.repeat(51) },
+      }),
+      res
+    );
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(body(res).message).toMatch(/50/);
+  });
+
+  it('"Khác" có ghi chú hợp lệ -> 201', async () => {
+    Category.findOne.mockResolvedValue(otherExpense());
+    const res = mockRes();
+    await ctrl.create(
+      mockReq({
+        body: { amount: 1000, type: 'expense', walletId: WALLET_ID, categoryId: CAT_EXPENSE_ID, note: 'Tiền gửi xe' },
+      }),
+      res
+    );
+    expect(res.status).toHaveBeenCalledWith(201);
+  });
+
+  it('danh mục khác "Khác" để trống ghi chú vẫn được', async () => {
+    Category.findOne.mockResolvedValue(makeCategory({ name: 'Ăn uống' }));
+    const res = mockRes();
+    await ctrl.create(
+      mockReq({ body: { amount: 1000, type: 'expense', walletId: WALLET_ID, categoryId: CAT_EXPENSE_ID } }),
+      res
+    );
+    expect(res.status).toHaveBeenCalledWith(201);
+  });
+
+  it('sửa ghi chú thành rỗng của giao dịch "Khác" -> 400', async () => {
+    const tx = makeTransaction({ note: 'có ghi chú' });
+    Transaction.findOne.mockResolvedValue(tx);
+    Category.findOne.mockResolvedValue(otherExpense());
+    const res = mockRes();
+    await ctrl.update(mockReq({ params: { id: String(tx._id) }, body: { note: '' } }), res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(tx.save).not.toHaveBeenCalled();
+  });
+});
+
+// ──────────────────────────────────────────────
+// 1d. SỬA / XÓA KHÔNG ĐƯỢC LÀM VÍ THƯỜNG ÂM
+// ──────────────────────────────────────────────
+describe('sửa / xóa giao dịch không làm ví thường âm', () => {
+  it('xóa giao dịch thu khi số dư ví không đủ để hoàn tác -> 400, không xóa', async () => {
+    const tx = makeTransaction({ amount: 5000000, type: 'income', walletId: WALLET_ID });
+    Transaction.findOne.mockResolvedValue(tx);
+    Wallet.findOneAndUpdate.mockResolvedValue(null);
+
+    const res = mockRes();
+    await ctrl.remove(mockReq({ params: { id: String(tx._id) } }), res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(body(res).code).toBe('INSUFFICIENT_BALANCE');
+    expect(tx.deleteOne).not.toHaveBeenCalled();
+  });
+
+  it('xóa chuyển khoản mà ví đích không đủ để hoàn tác -> 400 và hoàn tác ví nguồn đã cộng', async () => {
+    const tx = makeTransaction({
+      amount: 300000,
+      type: 'transfer',
+      walletId: WALLET_ID,
+      destinationWalletId: DEST_WALLET_ID,
+    });
+    Transaction.findOne.mockResolvedValue(tx);
+    Wallet.findByIdAndUpdate.mockResolvedValue(makeWallet());
+    Wallet.findOneAndUpdate.mockResolvedValue(null);
+
+    const res = mockRes();
+    await ctrl.remove(mockReq({ params: { id: String(tx._id) } }), res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    // Ví nguồn đã được cộng +300k rồi phải trừ lại -300k
+    expect(Wallet.findByIdAndUpdate).toHaveBeenCalledWith(
+      WALLET_ID,
+      { $inc: { balance: -300000 } },
+      { new: true }
+    );
+    expect(tx.deleteOne).not.toHaveBeenCalled();
+  });
+
+  it('sửa tăng số tiền chi vượt số dư -> 400, không lưu', async () => {
+    const oldTx = makeTransaction({ amount: 50000, type: 'expense', walletId: WALLET_ID });
+    Transaction.findOne.mockResolvedValue(oldTx);
+    Wallet.findByIdAndUpdate.mockResolvedValue(makeWallet());
+    Wallet.findOneAndUpdate.mockResolvedValue(null);
+
+    const res = mockRes();
+    await ctrl.update(mockReq({ params: { id: String(oldTx._id) }, body: { amount: 99999999 } }), res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(body(res).code).toBe('INSUFFICIENT_BALANCE');
+    expect(oldTx.save).not.toHaveBeenCalled();
   });
 });
 
@@ -318,6 +590,7 @@ describe('update transaction & balance adjustments', () => {
     Transaction.findOne.mockResolvedValue(oldTx);
     Wallet.findOne.mockResolvedValue(makeWallet());
     Wallet.findByIdAndUpdate.mockResolvedValue(makeWallet());
+    Wallet.findOneAndUpdate.mockResolvedValue(makeWallet());
 
     const res = mockRes();
     await ctrl.update(
@@ -329,11 +602,17 @@ describe('update transaction & balance adjustments', () => {
     );
 
     expect(res.status).toHaveBeenCalledWith(200);
-    // 1 lần hoàn tác (+50k) và 1 lần áp dụng (-80k) trên cùng ví, hoặc gộp delta (-30k)
-    // Kiểm tra tổng delta áp dụng lên WALLET_ID là -30000
-    const calls = Wallet.findByIdAndUpdate.mock.calls.filter((c) => c[0] === WALLET_ID);
-    const totalDelta = calls.reduce((sum, c) => sum + c[1].$inc.balance, 0);
-    expect(totalDelta).toBe(-30000);
+    // Hoàn tác số tiền cũ (+50k) áp trước, rồi trừ số tiền mới (-80k) có điều kiện số dư
+    expect(Wallet.findByIdAndUpdate).toHaveBeenCalledWith(
+      WALLET_ID,
+      { $inc: { balance: 50000 } },
+      { new: true }
+    );
+    expect(Wallet.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: WALLET_ID, $or: [{ type: 'credit_card' }, { balance: { $gte: 80000 } }] },
+      { $inc: { balance: -80000 } },
+      { new: true }
+    );
     expect(oldTx.save).toHaveBeenCalled();
   });
 
@@ -348,6 +627,8 @@ describe('update transaction & balance adjustments', () => {
     Wallet.findOne
       .mockResolvedValueOnce(makeWallet({ _id: NEW_WALLET_ID })) // check new wallet
       .mockResolvedValue(makeWallet());
+    Wallet.findByIdAndUpdate.mockResolvedValue(makeWallet());
+    Wallet.findOneAndUpdate.mockResolvedValue(makeWallet({ _id: NEW_WALLET_ID }));
 
     const res = mockRes();
     await ctrl.update(
@@ -365,9 +646,9 @@ describe('update transaction & balance adjustments', () => {
       { $inc: { balance: 50000 } },
       { new: true }
     );
-    // NEW_WALLET_ID mới phải bị trừ -50k
-    expect(Wallet.findByIdAndUpdate).toHaveBeenCalledWith(
-      NEW_WALLET_ID,
+    // NEW_WALLET_ID mới phải bị trừ -50k (cập nhật có điều kiện số dư)
+    expect(Wallet.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: NEW_WALLET_ID, $or: [{ type: 'credit_card' }, { balance: { $gte: 50000 } }] },
       { $inc: { balance: -50000 } },
       { new: true }
     );
@@ -406,14 +687,14 @@ describe('remove transaction & balance rollback', () => {
       walletId: WALLET_ID,
     });
     Transaction.findOne.mockResolvedValue(tx);
-    Wallet.findByIdAndUpdate.mockResolvedValue(makeWallet());
+    Wallet.findOneAndUpdate.mockResolvedValue(makeWallet());
 
     const res = mockRes();
     await ctrl.remove(mockReq({ params: { id: String(tx._id) } }), res);
 
     expect(res.status).toHaveBeenCalledWith(200);
-    expect(Wallet.findByIdAndUpdate).toHaveBeenCalledWith(
-      WALLET_ID,
+    expect(Wallet.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: WALLET_ID, $or: [{ type: 'credit_card' }, { balance: { $gte: 5000000 } }] },
       { $inc: { balance: -5000000 } },
       { new: true }
     );
@@ -429,6 +710,7 @@ describe('remove transaction & balance rollback', () => {
     });
     Transaction.findOne.mockResolvedValue(tx);
     Wallet.findByIdAndUpdate.mockResolvedValue(makeWallet());
+    Wallet.findOneAndUpdate.mockResolvedValue(makeWallet());
 
     const res = mockRes();
     await ctrl.remove(mockReq({ params: { id: String(tx._id) } }), res);
@@ -439,8 +721,8 @@ describe('remove transaction & balance rollback', () => {
       { $inc: { balance: 300000 } },
       { new: true }
     );
-    expect(Wallet.findByIdAndUpdate).toHaveBeenCalledWith(
-      DEST_WALLET_ID,
+    expect(Wallet.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: DEST_WALLET_ID, $or: [{ type: 'credit_card' }, { balance: { $gte: 300000 } }] },
       { $inc: { balance: -300000 } },
       { new: true }
     );

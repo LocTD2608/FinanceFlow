@@ -1,45 +1,24 @@
 const mongoose = require('mongoose');
 const Transaction = require('../models/Transaction');
 const Wallet = require('../models/Wallet');
-const Category = require('../models/Category');
+const { deltasFor, applyDeltas, insufficientBody } = require('../utils/walletBalance');
+const {
+  validateNoteForCategory,
+  findCategoryForType,
+} = require('../utils/categoryRules');
 
 const VALID_TYPES = ['expense', 'income', 'transfer'];
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 
-const visibleCategoryFilter = (userId) => ({
-  $or: [{ userId: null }, { userId }],
-  isDeleted: { $ne: true },
-});
+const fail = (res, status, message) => res.status(status).json({ success: false, message });
 
 /**
- * Tính toán & áp dụng thay đổi số dư lên ví.
- * @param {Object} txInfo { type, amount, walletId, destinationWalletId }
- * @param {boolean} revert true khi cần hoàn tác lại giao dịch (khi sửa/xóa)
+ * Hoàn tác thô các thay đổi số dư (dùng khi bước sau thất bại). Không áp điều kiện số dư.
  */
-const adjustWalletBalances = async ({ type, amount, walletId, destinationWalletId }, revert = false) => {
-  const numericAmount = Number(amount);
-  if (!numericAmount || numericAmount <= 0) return;
-
-  if (type === 'expense') {
-    // Chi tiêu: bình thường là -amount, khi revert là +amount
-    const delta = revert ? numericAmount : -numericAmount;
-    await Wallet.findByIdAndUpdate(walletId, { $inc: { balance: delta } }, { new: true });
-  } else if (type === 'income') {
-    // Thu nhập: bình thường là +amount, khi revert là -amount
-    const delta = revert ? -numericAmount : numericAmount;
-    await Wallet.findByIdAndUpdate(walletId, { $inc: { balance: delta } }, { new: true });
-  } else if (type === 'transfer') {
-    // Chuyển khoản:
-    // Ví nguồn: bình thường -amount, revert +amount
-    // Ví đích: bình thường +amount, revert -amount
-    const sourceDelta = revert ? numericAmount : -numericAmount;
-    const destDelta = revert ? -numericAmount : numericAmount;
-
-    await Wallet.findByIdAndUpdate(walletId, { $inc: { balance: sourceDelta } }, { new: true });
-    if (destinationWalletId) {
-      await Wallet.findByIdAndUpdate(destinationWalletId, { $inc: { balance: destDelta } }, { new: true });
-    }
+const rollbackDeltas = async (deltas) => {
+  for (const d of deltas) {
+    await Wallet.findByIdAndUpdate(d.walletId, { $inc: { balance: -d.delta } }, { new: true });
   }
 };
 
@@ -54,24 +33,24 @@ exports.create = async (req, res) => {
     // 1. Kiểm tra số tiền
     const numericAmount = Number(amount);
     if (isNaN(numericAmount) || numericAmount <= 0) {
-      return res.status(400).json({ success: false, message: 'Số tiền phải là số lớn hơn 0.' });
+      return fail(res, 400, 'Số tiền phải là số lớn hơn 0.');
     }
 
     // 2. Kiểm tra loại giao dịch
     if (!type || !VALID_TYPES.includes(type)) {
-      return res.status(400).json({ success: false, message: 'Loại giao dịch không hợp lệ (expense, income, transfer).' });
+      return fail(res, 400, 'Loại giao dịch không hợp lệ (expense, income, transfer).');
     }
 
     // 3. Kiểm tra ví nguồn
     if (!walletId || !isValidId(walletId)) {
-      return res.status(400).json({ success: false, message: 'ID ví không hợp lệ.' });
+      return fail(res, 400, 'ID ví không hợp lệ.');
     }
     const sourceWallet = await Wallet.findOne({ _id: walletId, userId });
     if (!sourceWallet) {
-      return res.status(404).json({ success: false, message: 'Không tìm thấy ví nguồn hoặc bạn không có quyền truy cập.' });
+      return fail(res, 404, 'Không tìm thấy ví nguồn hoặc bạn không có quyền truy cập.');
     }
     if (sourceWallet.isArchived) {
-      return res.status(400).json({ success: false, message: 'Ví này đã bị lưu trữ, không thể phát sinh giao dịch mới.' });
+      return fail(res, 400, 'Ví này đã bị lưu trữ, không thể phát sinh giao dịch mới.');
     }
 
     // 4. Xử lý theo từng loại giao dịch
@@ -80,17 +59,17 @@ exports.create = async (req, res) => {
 
     if (type === 'transfer') {
       if (!destinationWalletId || !isValidId(destinationWalletId)) {
-        return res.status(400).json({ success: false, message: 'Giao dịch chuyển khoản yêu cầu chọn ví đích hợp lệ.' });
+        return fail(res, 400, 'Giao dịch chuyển khoản yêu cầu chọn ví đích hợp lệ.');
       }
       if (String(destinationWalletId) === String(walletId)) {
-        return res.status(400).json({ success: false, message: 'Ví đích phải khác ví nguồn chuyển tiền.' });
+        return fail(res, 400, 'Ví đích phải khác ví nguồn chuyển tiền.');
       }
       const destWallet = await Wallet.findOne({ _id: destinationWalletId, userId });
       if (!destWallet) {
-        return res.status(404).json({ success: false, message: 'Không tìm thấy ví đích hoặc bạn không có quyền truy cập.' });
+        return fail(res, 404, 'Không tìm thấy ví đích hoặc bạn không có quyền truy cập.');
       }
       if (destWallet.isArchived) {
-        return res.status(400).json({ success: false, message: 'Ví đích đã bị lưu trữ, không thể nhận tiền chuyển.' });
+        return fail(res, 400, 'Ví đích đã bị lưu trữ, không thể nhận tiền chuyển.');
       }
       finalDestWalletId = destWallet._id;
       if (categoryId && isValidId(categoryId)) {
@@ -99,41 +78,56 @@ exports.create = async (req, res) => {
     } else {
       // expense hoặc income -> cần categoryId hợp lệ và cùng type
       if (!categoryId || !isValidId(categoryId)) {
-        return res.status(400).json({ success: false, message: 'Vui lòng chọn danh mục hợp lệ.' });
+        return fail(res, 400, 'Vui lòng chọn danh mục hợp lệ.');
       }
-      const category = await Category.findOne({ _id: categoryId, ...visibleCategoryFilter(userId) });
-      if (!category) {
-        return res.status(404).json({ success: false, message: 'Không tìm thấy danh mục.' });
-      }
-      if (category.type !== type) {
-        return res.status(400).json({
-          success: false,
-          message: `Danh mục "${category.name}" là loại ${category.type}, không khớp với loại giao dịch ${type}.`,
-        });
-      }
-      finalCategoryId = category._id;
+      const found = await findCategoryForType(userId, categoryId, type);
+      if (found.message) return fail(res, found.status, found.message);
+
+      // Danh mục "Khác" bắt buộc ghi chú
+      const noteError = validateNoteForCategory(found.category, note);
+      if (noteError) return fail(res, 400, noteError);
+
+      finalCategoryId = found.category._id;
     }
 
-    // 5. Cập nhật số dư ví
-    await adjustWalletBalances({
-      type,
-      amount: numericAmount,
-      walletId: sourceWallet._id,
-      destinationWalletId: finalDestWalletId,
-    });
+    // 5. Kiểm tra đủ số dư (ví thường không được âm; ví credit_card được phép âm)
+    const spendsFromSource = type === 'expense' || type === 'transfer';
+    if (spendsFromSource && sourceWallet.type !== 'credit_card' && sourceWallet.balance < numericAmount) {
+      return res.status(400).json(insufficientBody(sourceWallet.balance, numericAmount));
+    }
 
-    // 6. Lưu bản ghi Transaction
-    const transaction = await Transaction.create({
-      userId,
-      walletId: sourceWallet._id,
-      categoryId: finalCategoryId,
-      destinationWalletId: finalDestWalletId,
-      amount: numericAmount,
+    // 6. Cập nhật số dư ví (có điều kiện, an toàn khi gọi đồng thời)
+    const deltas = deltasFor({
       type,
-      transactionDate: transactionDate ? new Date(transactionDate) : new Date(),
-      note: typeof note === 'string' ? note.trim() : '',
-      receiptImageUrl: receiptImageUrl || null,
+      amount: numericAmount,
+      walletId: sourceWallet._id,
+      destinationWalletId: finalDestWalletId,
     });
+    const applied = await applyDeltas(deltas);
+    if (!applied.ok) {
+      const fresh = await Wallet.findById(sourceWallet._id);
+      const current = fresh ? fresh.balance : sourceWallet.balance;
+      return res.status(400).json(insufficientBody(current, numericAmount));
+    }
+
+    // 7. Lưu bản ghi Transaction (lỗi thì hoàn tác số dư)
+    let transaction;
+    try {
+      transaction = await Transaction.create({
+        userId,
+        walletId: sourceWallet._id,
+        categoryId: finalCategoryId,
+        destinationWalletId: finalDestWalletId,
+        amount: numericAmount,
+        type,
+        transactionDate: transactionDate ? new Date(transactionDate) : new Date(),
+        note: typeof note === 'string' ? note.trim() : '',
+        receiptImageUrl: receiptImageUrl || null,
+      });
+    } catch (err) {
+      await rollbackDeltas(deltas);
+      throw err;
+    }
 
     return res.status(201).json({
       success: true,
@@ -213,7 +207,7 @@ exports.getById = async (req, res) => {
   try {
     const { id } = req.params;
     if (!isValidId(id)) {
-      return res.status(400).json({ success: false, message: 'ID giao dịch không hợp lệ.' });
+      return fail(res, 400, 'ID giao dịch không hợp lệ.');
     }
 
     const transaction = await Transaction.findOne({ _id: id, userId: req.user.id })
@@ -223,7 +217,7 @@ exports.getById = async (req, res) => {
       .lean();
 
     if (!transaction) {
-      return res.status(404).json({ success: false, message: 'Không tìm thấy giao dịch.' });
+      return fail(res, 404, 'Không tìm thấy giao dịch.');
     }
 
     return res.json({ success: true, data: transaction });
@@ -240,12 +234,12 @@ exports.update = async (req, res) => {
     const userId = req.user.id;
     const { id } = req.params;
     if (!isValidId(id)) {
-      return res.status(400).json({ success: false, message: 'ID giao dịch không hợp lệ.' });
+      return fail(res, 400, 'ID giao dịch không hợp lệ.');
     }
 
     const transaction = await Transaction.findOne({ _id: id, userId });
     if (!transaction) {
-      return res.status(404).json({ success: false, message: 'Không tìm thấy giao dịch.' });
+      return fail(res, 404, 'Không tìm thấy giao dịch.');
     }
 
     const {
@@ -265,41 +259,60 @@ exports.update = async (req, res) => {
     const newDestWalletId = destinationWalletId !== undefined ? destinationWalletId : transaction.destinationWalletId;
 
     if (isNaN(newAmount) || newAmount <= 0) {
-      return res.status(400).json({ success: false, message: 'Số tiền phải lớn hơn 0.' });
+      return fail(res, 400, 'Số tiền phải lớn hơn 0.');
     }
     if (!VALID_TYPES.includes(newType)) {
-      return res.status(400).json({ success: false, message: 'Loại giao dịch không hợp lệ.' });
+      return fail(res, 400, 'Loại giao dịch không hợp lệ.');
     }
 
     // Kiểm tra ví mới nếu có thay đổi
     if (walletId && isValidId(walletId)) {
       const w = await Wallet.findOne({ _id: walletId, userId });
-      if (!w) return res.status(404).json({ success: false, message: 'Không tìm thấy ví đã chọn.' });
+      if (!w) return fail(res, 404, 'Không tìm thấy ví đã chọn.');
     }
 
-    // 1. Hoàn tác tác động số dư cũ
-    await adjustWalletBalances(
+    // Quy tắc danh mục "Khác" bắt buộc ghi chú (chỉ kiểm tra khi sửa danh mục hoặc ghi chú)
+    if (newType !== 'transfer' && (categoryId !== undefined || note !== undefined)) {
+      const effectiveCategoryId = categoryId !== undefined ? categoryId : transaction.categoryId;
+      if (!effectiveCategoryId || !isValidId(String(effectiveCategoryId))) {
+        return fail(res, 400, 'Vui lòng chọn danh mục hợp lệ.');
+      }
+      const found = await findCategoryForType(userId, effectiveCategoryId, newType);
+      if (found.message) return fail(res, found.status, found.message);
+      const effectiveNote = note !== undefined ? note : transaction.note;
+      const noteError = validateNoteForCategory(found.category, effectiveNote);
+      if (noteError) return fail(res, 400, noteError);
+    }
+
+    // Hoàn tác số dư cũ + áp số dư mới trong một lần (không để ví thường âm)
+    const oldDeltas = deltasFor(
       {
         type: transaction.type,
         amount: transaction.amount,
         walletId: transaction.walletId,
         destinationWalletId: transaction.destinationWalletId,
       },
-      true // revert = true
+      true
     );
+    const newDeltas = deltasFor({
+      type: newType,
+      amount: newAmount,
+      walletId: newWalletId,
+      destinationWalletId: newDestWalletId,
+    });
+    const allDeltas = [...oldDeltas, ...newDeltas];
+    const applied = await applyDeltas(allDeltas);
+    if (!applied.ok) {
+      return res
+        .status(400)
+        .json({
+          success: false,
+          code: 'INSUFFICIENT_BALANCE',
+          message: 'Không thể cập nhật vì số dư ví không đủ cho thay đổi này.',
+        });
+    }
 
-    // 2. Áp dụng tác động số dư mới
-    await adjustWalletBalances(
-      {
-        type: newType,
-        amount: newAmount,
-        walletId: newWalletId,
-        destinationWalletId: newDestWalletId,
-      },
-      false // apply = true
-    );
-
-    // 3. Cập nhật các trường
+    // Cập nhật các trường
     transaction.amount = newAmount;
     transaction.type = newType;
     transaction.walletId = newWalletId;
@@ -309,7 +322,12 @@ exports.update = async (req, res) => {
     if (note !== undefined) transaction.note = typeof note === 'string' ? note.trim() : '';
     if (receiptImageUrl !== undefined) transaction.receiptImageUrl = receiptImageUrl;
 
-    await transaction.save();
+    try {
+      await transaction.save();
+    } catch (err) {
+      await rollbackDeltas(allDeltas);
+      throw err;
+    }
 
     return res.status(200).json({
       success: true,
@@ -329,26 +347,39 @@ exports.remove = async (req, res) => {
     const userId = req.user.id;
     const { id } = req.params;
     if (!isValidId(id)) {
-      return res.status(400).json({ success: false, message: 'ID giao dịch không hợp lệ.' });
+      return fail(res, 400, 'ID giao dịch không hợp lệ.');
     }
 
     const transaction = await Transaction.findOne({ _id: id, userId });
     if (!transaction) {
-      return res.status(404).json({ success: false, message: 'Không tìm thấy giao dịch.' });
+      return fail(res, 404, 'Không tìm thấy giao dịch.');
     }
 
-    // Hoàn tác lại số dư
-    await adjustWalletBalances(
+    // Hoàn tác lại số dư (không để ví thường âm)
+    const deltas = deltasFor(
       {
         type: transaction.type,
         amount: transaction.amount,
         walletId: transaction.walletId,
         destinationWalletId: transaction.destinationWalletId,
       },
-      true // revert = true
+      true
     );
+    const applied = await applyDeltas(deltas);
+    if (!applied.ok) {
+      return res.status(400).json({
+        success: false,
+        code: 'INSUFFICIENT_BALANCE',
+        message: 'Không thể xóa vì số dư ví hiện tại không đủ để hoàn tác giao dịch này.',
+      });
+    }
 
-    await transaction.deleteOne();
+    try {
+      await transaction.deleteOne();
+    } catch (err) {
+      await rollbackDeltas(deltas);
+      throw err;
+    }
 
     return res.status(200).json({
       success: true,

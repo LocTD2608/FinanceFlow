@@ -2,12 +2,19 @@ const mongoose = require('mongoose');
 const Wallet = require('../models/Wallet');
 const Transaction = require('../models/Transaction');
 const Category = require('../models/Category');
+const { validateNoteForCategory } = require('../utils/categoryRules');
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 
 const WALLET_TYPES = ['cash', 'bank', 'credit_card', 'savings', 'investment'];
 const INITIAL_BALANCE_NOTE = 'Số dư ban đầu';
 const INITIAL_BALANCE_CATEGORY = 'Khác (Thu)';
+
+// Danh mục thu cho phép chọn khi nạp tiền (mặc định: Lương)
+const TOPUP_CATEGORY_NAMES = ['Lương', 'Thưởng', 'Công việc phụ', 'Vay mượn', 'Đầu tư', 'Kinh doanh', 'Khác (Thu)'];
+const DEFAULT_TOPUP_CATEGORY = 'Lương';
+const TOPUP_MAX_AMOUNT = 100000000;
+const IDEMPOTENCY_KEY_MAX = 100;
 
 const fail = (res, status, message) => res.status(status).json({ success: false, message });
 
@@ -265,6 +272,129 @@ exports.remove = async (req, res) => {
 
     await Wallet.updateOne({ _id: id, userId }, { $set: { isArchived: true } });
     return res.json({ success: true, message: 'Đã xóa ví.' });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Lỗi server: ' + error.message });
+  }
+};
+
+/**
+ * POST /api/wallets/:id/topup - Nạp tiền vào ví (mô phỏng)
+ * Body: { amount, categoryId?, note?, idempotencyKey? }
+ *  - categoryId mặc định "Lương"; chỉ nhận danh mục thu trong TOPUP_CATEGORY_NAMES
+ *  - Chọn "Khác" thì note bắt buộc
+ *  - idempotencyKey: gửi lại cùng khóa thì không nạp lần 2, trả lại kết quả cũ
+ * Nạp vào ví credit_card nghĩa là trả bớt dư nợ.
+ */
+exports.topup = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+    if (!isValidId(id)) return fail(res, 400, 'ID ví không hợp lệ.');
+
+    const body = req.body || {};
+    const amount = parseBalance(body.amount);
+    if (amount === null || amount <= 0) return fail(res, 400, 'Số tiền nạp phải là số lớn hơn 0.');
+    if (amount > TOPUP_MAX_AMOUNT) {
+      return fail(res, 400, `Số tiền nạp tối đa mỗi lần là ${TOPUP_MAX_AMOUNT.toLocaleString('vi-VN')} đ.`);
+    }
+
+    let idempotencyKey;
+    if (body.idempotencyKey !== undefined && body.idempotencyKey !== null) {
+      if (
+        typeof body.idempotencyKey !== 'string' ||
+        !body.idempotencyKey.trim() ||
+        body.idempotencyKey.length > IDEMPOTENCY_KEY_MAX
+      ) {
+        return fail(res, 400, 'idempotencyKey không hợp lệ.');
+      }
+      idempotencyKey = body.idempotencyKey.trim();
+    }
+
+    // Gửi lại cùng khóa: trả kết quả cũ, không nạp lần nữa
+    const replay = async () => {
+      const existing = await Transaction.findOne({ userId, idempotencyKey });
+      if (!existing) return null;
+      if (String(existing.walletId) !== String(id)) {
+        fail(res, 409, 'idempotencyKey đã được dùng cho một ví khác.');
+        return true;
+      }
+      const current = await Wallet.findOne({ _id: id, userId });
+      res.json({
+        success: true,
+        message: 'Giao dịch nạp tiền này đã được ghi nhận trước đó.',
+        idempotent: true,
+        data: { wallet: current, transaction: existing },
+      });
+      return true;
+    };
+    if (idempotencyKey && (await replay())) return;
+
+    const wallet = await Wallet.findOne({ _id: id, userId, isArchived: { $ne: true } });
+    if (!wallet) return fail(res, 404, 'Không tìm thấy ví.');
+
+    // Danh mục: mặc định "Lương"; chỉ nhận danh mục thu mặc định trong danh sách cho phép
+    let category;
+    if (body.categoryId !== undefined && body.categoryId !== null && body.categoryId !== '') {
+      if (typeof body.categoryId !== 'string' || !isValidId(body.categoryId)) {
+        return fail(res, 400, 'ID danh mục không hợp lệ.');
+      }
+      category = await Category.findOne({
+        _id: body.categoryId,
+        userId: null,
+        isDefault: true,
+        type: 'income',
+        isDeleted: { $ne: true },
+      });
+      if (!category || !TOPUP_CATEGORY_NAMES.includes(category.name)) {
+        return fail(res, 400, 'Danh mục không hợp lệ cho việc nạp tiền.');
+      }
+    } else {
+      category = await Category.findOne({
+        userId: null,
+        isDefault: true,
+        type: 'income',
+        name: DEFAULT_TOPUP_CATEGORY,
+      });
+      if (!category) return fail(res, 500, 'Chưa có danh mục mặc định "Lương". Hãy chạy seed danh mục.');
+    }
+
+    const note = typeof body.note === 'string' ? body.note.trim() : '';
+    const noteError = validateNoteForCategory(category, note);
+    if (noteError) return fail(res, 400, noteError);
+
+    // Cộng số dư nguyên tử
+    const updatedWallet = await Wallet.findOneAndUpdate(
+      { _id: id, userId, isArchived: { $ne: true } },
+      { $inc: { balance: amount } },
+      { new: true }
+    );
+    if (!updatedWallet) return fail(res, 404, 'Không tìm thấy ví.');
+
+    // Ghi giao dịch thu; lỗi thì hoàn tác số dư
+    let transaction;
+    try {
+      transaction = await Transaction.create({
+        userId,
+        walletId: wallet._id,
+        categoryId: category._id,
+        amount,
+        type: 'income',
+        note,
+        transactionDate: new Date(),
+        ...(idempotencyKey ? { idempotencyKey } : {}),
+      });
+    } catch (err) {
+      await Wallet.findByIdAndUpdate(wallet._id, { $inc: { balance: -amount } }, { new: true });
+      // Hai request cùng khóa chạy song song: request đến sau trả kết quả của request trước
+      if (err && err.code === 11000 && idempotencyKey && (await replay())) return;
+      throw err;
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: 'Nạp tiền thành công!',
+      data: { wallet: updatedWallet, transaction },
+    });
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Lỗi server: ' + error.message });
   }
