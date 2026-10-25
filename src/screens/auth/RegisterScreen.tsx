@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { THEME } from '../../constants/theme';
 import { authApi } from '../../api/auth';
 import { useAuthStore } from '../../store/useAuthStore';
+import { Eye, EyeOff } from 'lucide-react-native';
 
 interface Props {
   onNavigateToLogin: () => void;
@@ -25,6 +26,7 @@ export default function RegisterScreen({ onNavigateToLogin, onRegisterSuccess }:
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -103,14 +105,28 @@ export default function RegisterScreen({ onNavigateToLogin, onRegisterSuccess }:
             {/* Input Mật khẩu */}
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Mật khẩu</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Nhập mật khẩu (tối thiểu 6 ký tự)..."
-                placeholderTextColor="#94A3B8"
-                secureTextEntry
-                value={password}
-                onChangeText={(t) => { setPassword(t); setErrorMsg(''); }}
-              />
+              <View style={styles.passwordContainer}>
+                <TextInput
+                  style={styles.passwordInput}
+                  placeholder="Nhập mật khẩu (tối thiểu 6 ký tự)..."
+                  placeholderTextColor="#94A3B8"
+                  secureTextEntry={!showPassword}
+                  value={password}
+                  onChangeText={(t) => { setPassword(t); setErrorMsg(''); }}
+                />
+                <TouchableOpacity
+                  style={styles.eyeBtn}
+                  onPress={() => setShowPassword((prev) => !prev)}
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  {showPassword ? (
+                    <EyeOff size={20} color="#64748B" />
+                  ) : (
+                    <Eye size={20} color="#64748B" />
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
 
             {/* Thông báo lỗi nếu có */}
@@ -190,6 +206,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     fontSize: 15,
     color: THEME.colors.textPrimary,
+  },
+  passwordContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 48,
+    backgroundColor: THEME.colors.inputBg,
+    borderRadius: THEME.borderRadius.input,
+    paddingHorizontal: 16,
+  },
+  passwordInput: {
+    flex: 1,
+    height: '100%',
+    fontSize: 15,
+    color: THEME.colors.textPrimary,
+    padding: 0,
+  },
+  eyeBtn: {
+    paddingLeft: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   errorText: {
     color: THEME.colors.error,
