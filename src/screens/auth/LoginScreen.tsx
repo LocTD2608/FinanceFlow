@@ -13,8 +13,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { THEME } from '../../constants/theme';
-import { authApi } from '../../api/auth';
+import { authApi, SocialLoginPayload } from '../../api/auth';
 import { useAuthStore } from '../../store/useAuthStore';
+import { SocialAuthModal } from '../../components/auth/SocialAuthModal';
+import { GoogleIcon, AppleIcon, FacebookIcon } from '../../components/auth/SocialIcons';
 
 interface Props {
   onNavigateToRegister: () => void;
@@ -26,6 +28,11 @@ export default function LoginScreen({ onNavigateToRegister, onLoginSuccess }: Pr
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+
+  // Social Auth States
+  const [socialModalVisible, setSocialModalVisible] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState<'google' | 'apple' | 'facebook' | null>(null);
+  const [socialLoading, setSocialLoading] = useState(false);
 
   const { setUser } = useAuthStore();
 
@@ -45,6 +52,26 @@ export default function LoginScreen({ onNavigateToRegister, onLoginSuccess }: Pr
       onLoginSuccess(res.user.username);
     } else {
       setErrorMsg(res.message || 'Đăng nhập không thành công.');
+    }
+  };
+
+  const handleOpenSocialModal = (provider: 'google' | 'apple' | 'facebook') => {
+    setSelectedProvider(provider);
+    setSocialModalVisible(true);
+    setErrorMsg('');
+  };
+
+  const handleSocialSelect = async (payload: SocialLoginPayload) => {
+    setSocialLoading(true);
+    const res = await authApi.socialLogin(payload);
+    setSocialLoading(false);
+    setSocialModalVisible(false);
+
+    if (res.success && res.user && res.token) {
+      await setUser(res.user, res.token);
+      onLoginSuccess(res.user.username);
+    } else {
+      setErrorMsg(res.message || 'Đăng nhập mạng xã hội thất bại.');
     }
   };
 
@@ -144,8 +171,63 @@ export default function LoginScreen({ onNavigateToRegister, onLoginSuccess }: Pr
               <Text style={styles.buttonText}>Đăng nhập</Text>
             )}
           </TouchableOpacity>
+
+          {/* Dải phân cách: Hoặc tiếp tục với */}
+          <View style={styles.dividerRow}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>Hoặc tiếp tục với</Text>
+            <View style={styles.dividerLine} />
+          </View>
+
+          {/* Hàng nút Social Login chuẩn Apple HIG & Google Brand Guidelines */}
+          <View style={styles.socialButtonsContainer}>
+            {/* Nút Apple (Hiển thị khi chạy trên iOS hoặc Web theo chuẩn Apple HIG) */}
+            {(Platform.OS === 'ios' || Platform.OS === 'web') && (
+              <TouchableOpacity
+                style={styles.appleButton}
+                activeOpacity={0.85}
+                onPress={() => handleOpenSocialModal('apple')}
+                disabled={socialLoading}
+              >
+                <AppleIcon size={20} color="#FFFFFF" />
+                <Text style={styles.appleButtonText}>Tiếp tục với Apple</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Hàng 2 nút Google & Facebook */}
+            <View style={styles.socialRow}>
+              <TouchableOpacity
+                style={styles.googleButton}
+                activeOpacity={0.8}
+                onPress={() => handleOpenSocialModal('google')}
+                disabled={socialLoading}
+              >
+                <GoogleIcon size={19} />
+                <Text style={styles.googleButtonText}>Google</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.facebookButton}
+                activeOpacity={0.8}
+                onPress={() => handleOpenSocialModal('facebook')}
+                disabled={socialLoading}
+              >
+                <FacebookIcon size={19} color="#FFFFFF" />
+                <Text style={styles.facebookButtonText}>Facebook</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Modal xác thực mạng xã hội (Demo / Hybrid) */}
+      <SocialAuthModal
+        visible={socialModalVisible}
+        provider={selectedProvider}
+        loading={socialLoading}
+        onClose={() => setSocialModalVisible(false)}
+        onSelectAccount={handleSocialSelect}
+      />
     </SafeAreaView>
   );
 }
@@ -178,7 +260,7 @@ const styles = StyleSheet.create({
     paddingVertical: 32,
     borderWidth: 1.5,
     borderColor: '#E2E8F0',
-    marginBottom: 32,
+    marginBottom: 24,
     ...THEME.shadow,
   },
   inputGroup: {
@@ -273,11 +355,104 @@ const styles = StyleSheet.create({
     borderRadius: THEME.borderRadius.button,
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: 20,
     ...THEME.shadow,
   },
   buttonText: {
     fontSize: 17,
     fontWeight: '700',
     color: THEME.colors.primaryText,
+  },
+  dividerRow: {
+    width: '100%',
+    maxWidth: 380,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#CBD5E1',
+  },
+  dividerText: {
+    marginHorizontal: 12,
+    fontSize: 13,
+    color: '#64748B',
+    fontWeight: '500',
+  },
+  socialButtonsContainer: {
+    width: '100%',
+    maxWidth: 380,
+    alignItems: 'center',
+  },
+  appleButton: {
+    width: '100%',
+    height: 48,
+    backgroundColor: '#000000',
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  appleButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '600',
+    marginLeft: 10,
+  },
+  socialRow: {
+    width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  googleButton: {
+    flex: 1,
+    height: 46,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    borderWidth: 1.2,
+    borderColor: '#E2E8F0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  googleButtonText: {
+    color: '#1E293B',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  facebookButton: {
+    flex: 1,
+    height: 46,
+    backgroundColor: '#1877F2',
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#1877F2',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  facebookButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 8,
   },
 });
