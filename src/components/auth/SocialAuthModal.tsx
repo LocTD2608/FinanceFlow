@@ -13,6 +13,7 @@ import {
 import { THEME } from '../../constants/theme';
 import { SocialLoginPayload } from '../../api/auth';
 import { GoogleIcon, AppleIcon, FacebookIcon } from './SocialIcons';
+import { startGoogleOAuthFlow } from '../../utils/googleAuth';
 
 interface Props {
   visible: boolean;
@@ -27,6 +28,8 @@ export function SocialAuthModal({ visible, provider, loading, onClose, onSelectA
   const [customName, setCustomName] = useState('');
   const [customEmail, setCustomEmail] = useState('');
   const [validationError, setValidationError] = useState('');
+  const [realOAuthLoading, setRealOAuthLoading] = useState(false);
+  const [oauthError, setOauthError] = useState('');
 
   if (!provider) return null;
 
@@ -100,6 +103,19 @@ export function SocialAuthModal({ visible, provider, loading, onClose, onSelectA
 
   const info = getProviderInfo();
 
+  const handleRealGoogleLogin = async () => {
+    setOauthError('');
+    setRealOAuthLoading(true);
+    try {
+      const payload = await startGoogleOAuthFlow();
+      onSelectAccount(payload);
+    } catch (err: any) {
+      setOauthError(err.message || 'Không thể đăng nhập tài khoản Google.');
+    } finally {
+      setRealOAuthLoading(false);
+    }
+  };
+
   const handleCustomSubmit = () => {
     setValidationError('');
     if (!customEmail.trim() || !customEmail.includes('@')) {
@@ -126,8 +142,41 @@ export function SocialAuthModal({ visible, provider, loading, onClose, onSelectA
           </View>
 
           <Text style={styles.subTitle}>{info.sub}</Text>
+
+          {/* Nút đăng nhập thật với Google nếu trên Web */}
+          {provider === 'google' && Platform.OS === 'web' && (
+            <View style={styles.realOAuthContainer}>
+              <TouchableOpacity
+                style={styles.realGoogleBtn}
+                activeOpacity={0.85}
+                onPress={handleRealGoogleLogin}
+                disabled={realOAuthLoading || loading}
+              >
+                {realOAuthLoading ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <ActivityIndicator size="small" color="#1E293B" />
+                    <Text style={[styles.realGoogleBtnText, { marginLeft: 8 }]}>Đang kết nối Google...</Text>
+                  </View>
+                ) : (
+                  <>
+                    <GoogleIcon size={20} />
+                    <Text style={styles.realGoogleBtnText}>Đăng nhập tài khoản Google thật</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+              {oauthError ? (
+                <View style={styles.errorNoticeBox}>
+                  <Text style={styles.errorNoticeText}>⚠️ {oauthError}</Text>
+                  <Text style={styles.errorNoticeSub}>
+                    Gợi ý: Hãy đảm bảo email của bạn đã được thêm vào mục &quot;Người dùng thử nghiệm&quot; trên Google Cloud Console.
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+          )}
+
           <Text style={styles.note}>
-            ⚡ Chế độ kiểm thử nhanh: Chọn tài khoản đại diện để đăng nhập và kết nối thẳng tới Cloud MongoDB Atlas:
+            ⚡ Hoặc chọn tài khoản mẫu đại diện để kiểm thử nhanh vào Cloud MongoDB:
           </Text>
 
           {loading ? (
@@ -168,7 +217,7 @@ export function SocialAuthModal({ visible, provider, loading, onClose, onSelectA
               </TouchableOpacity>
             </View>
           ) : (
-            <ScrollView style={{ maxHeight: 280 }} showsVerticalScrollIndicator={false}>
+            <ScrollView style={{ maxHeight: 240 }} showsVerticalScrollIndicator={false}>
               {info.samples.map((acc, index) => (
                 <TouchableOpacity
                   key={index}
@@ -206,7 +255,7 @@ export function SocialAuthModal({ visible, provider, loading, onClose, onSelectA
           )}
 
           {/* Nút Đóng */}
-          <TouchableOpacity style={styles.closeBtn} onPress={onClose} disabled={loading} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.closeBtn} onPress={onClose} disabled={loading || realOAuthLoading} activeOpacity={0.7}>
             <Text style={styles.closeBtnText}>Hủy bỏ</Text>
           </TouchableOpacity>
         </View>
@@ -242,7 +291,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 12,
-    marginBottom: 12,
+    marginBottom: 10,
   },
   headerBadgeText: {
     color: '#FFFFFF',
@@ -254,17 +303,60 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#64748B',
     textAlign: 'center',
-    marginBottom: 6,
+    marginBottom: 12,
     fontWeight: '600',
+  },
+  realOAuthContainer: {
+    marginBottom: 12,
+  },
+  realGoogleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1.5,
+    borderColor: '#4285F4',
+    paddingVertical: 12,
+    borderRadius: 12,
+    gap: 10,
+    shadowColor: '#4285F4',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  realGoogleBtnText: {
+    color: '#1E293B',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  errorNoticeBox: {
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: 8,
+    padding: 8,
+    marginTop: 8,
+  },
+  errorNoticeText: {
+    color: '#DC2626',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  errorNoticeSub: {
+    color: '#7F1D1D',
+    fontSize: 11,
+    marginTop: 2,
+    lineHeight: 15,
   },
   note: {
     fontSize: 12,
     color: '#475569',
     textAlign: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
     lineHeight: 17,
     backgroundColor: '#F1F5F9',
-    padding: 10,
+    padding: 8,
     borderRadius: 8,
   },
   loadingBox: {
@@ -281,24 +373,24 @@ const styles = StyleSheet.create({
   accountItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
+    padding: 10,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    marginBottom: 10,
+    marginBottom: 8,
     backgroundColor: '#FAFAFA',
   },
   avatarPlaceholder: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: '#3B82F6',
     justifyContent: 'center',
     alignItems: 'center',
   },
   avatarLetter: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
   },
   accName: {
@@ -309,17 +401,17 @@ const styles = StyleSheet.create({
   accEmail: {
     fontSize: 12,
     color: '#64748B',
-    marginTop: 2,
+    marginTop: 1,
   },
   arrowIcon: {
-    fontSize: 18,
+    fontSize: 16,
     color: '#94A3B8',
     fontWeight: '700',
   },
   customToggleBtn: {
-    paddingVertical: 10,
+    paddingVertical: 8,
     alignItems: 'center',
-    marginTop: 4,
+    marginTop: 2,
   },
   customToggleText: {
     fontSize: 13,
@@ -327,17 +419,17 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   customForm: {
-    paddingVertical: 8,
+    paddingVertical: 6,
   },
   formLabel: {
     fontSize: 13,
     fontWeight: '600',
     color: '#334155',
     marginBottom: 4,
-    marginTop: 8,
+    marginTop: 6,
   },
   formInput: {
-    height: 44,
+    height: 42,
     borderWidth: 1,
     borderColor: '#CBD5E1',
     borderRadius: 8,
@@ -353,11 +445,11 @@ const styles = StyleSheet.create({
   },
   primaryBtn: {
     backgroundColor: THEME.colors.primary,
-    height: 44,
+    height: 42,
     borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 16,
+    marginTop: 14,
   },
   primaryBtnText: {
     color: THEME.colors.primaryText,
@@ -365,9 +457,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   textBtn: {
-    paddingVertical: 10,
+    paddingVertical: 8,
     alignItems: 'center',
-    marginTop: 6,
+    marginTop: 4,
   },
   textBtnTitle: {
     fontSize: 13,
@@ -375,7 +467,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   closeBtn: {
-    marginTop: 16,
+    marginTop: 12,
     paddingVertical: 10,
     alignItems: 'center',
     borderTopWidth: 1,
