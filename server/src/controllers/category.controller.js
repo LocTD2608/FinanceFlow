@@ -46,21 +46,34 @@ const getOwnedCategory = async (id, userId) => {
   return { category };
 };
 
-// GET /api/categories?type=expense|income
+// GET /api/categories?type=expense|income&isDefault=true|false&group=true
 exports.list = async (req, res) => {
   try {
-    const { type } = req.query;
+    const { type, isDefault, group } = req.query;
     if (type && !VALID_TYPES.includes(type)) {
       return res.status(400).json({ success: false, message: 'Loại danh mục phải là expense hoặc income.' });
     }
     const filter = visibleFilter(req.user.id);
     if (type) filter.type = type;
+    if (isDefault !== undefined) {
+      filter.isDefault = isDefault === 'true';
+    }
 
     const categories = await Category.find(filter)
       .collation(NAME_COLLATION)
       .sort({ isDefault: -1, name: 1 });
 
-    return res.json({ success: true, data: categories.map(serialize) });
+    const serialized = categories.map(serialize);
+
+    if (group === 'true') {
+      const groupedData = {
+        expense: serialized.filter((c) => c.type === 'expense'),
+        income: serialized.filter((c) => c.type === 'income'),
+      };
+      return res.json({ success: true, data: groupedData });
+    }
+
+    return res.json({ success: true, data: serialized });
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Lỗi server: ' + error.message });
   }

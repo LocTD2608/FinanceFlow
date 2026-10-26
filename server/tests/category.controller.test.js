@@ -95,6 +95,27 @@ describe('list (US-CAT-01)', () => {
     expect(Category.find.mock.calls[0][0].type).toBe('income');
   });
 
+  it('lọc theo isDefault hợp lệ', async () => {
+    Category.find.mockReturnValue(query([]));
+    await ctrl.list(mockReq({ query: { isDefault: 'true' } }), mockRes());
+    expect(Category.find.mock.calls[0][0].isDefault).toBe(true);
+  });
+
+  it('gom nhóm theo thu/chi khi truyền group=true', async () => {
+    const cats = [
+      makeCategory({ type: 'expense', name: 'Ăn uống' }),
+      makeCategory({ type: 'income', name: 'Lương' }),
+    ];
+    Category.find.mockReturnValue(query(cats));
+    const res = mockRes();
+    await ctrl.list(mockReq({ query: { group: 'true' } }), res);
+    expect(body(res).success).toBe(true);
+    expect(body(res).data).toHaveProperty('expense');
+    expect(body(res).data).toHaveProperty('income');
+    expect(body(res).data.expense[0].name).toBe('Ăn uống');
+    expect(body(res).data.income[0].name).toBe('Lương');
+  });
+
   it('type không hợp lệ -> 400', async () => {
     const res = mockRes();
     await ctrl.list(mockReq({ query: { type: 'abc' } }), res);

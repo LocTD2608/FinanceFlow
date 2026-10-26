@@ -5,6 +5,7 @@ const cors = require('cors');
 const connectDB = require('./config/db');
 const authRoutes = require('./routes/auth.routes');
 const categoryRoutes = require('./routes/category.routes');
+const dashboardRoutes = require('./routes/dashboard.routes');
 const transactionRoutes = require('./routes/transaction.routes');
 const walletRoutes = require('./routes/wallet.routes');
 const budgetRoutes = require('./routes/budget.routes');
@@ -33,6 +34,9 @@ app.use('/api/wallets', walletRoutes);
 
 // 5. Quản lý ngân sách (Budgets)
 app.use('/api/budgets', budgetRoutes);
+
+// 6. Thống kê Dashboard (tổng thu/chi, số dư, biểu đồ theo danh mục)
+app.use('/api/dashboard', dashboardRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
