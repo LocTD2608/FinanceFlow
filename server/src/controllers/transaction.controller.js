@@ -6,6 +6,7 @@ const Budget = require('../models/Budget');
 const { getPeriodRange } = require('../utils/period');
 
 const VALID_TYPES = ['expense', 'income'];
+const ALL_TYPES = ['expense', 'income', 'transfer'];
 const OTHER_NOTE_MAX = 50;
 const OFFSET_MS = 7 * 60 * 60 * 1000; // giờ Hà Nội (UTC+7)
 const BUDGET_THRESHOLDS = [
@@ -95,7 +96,35 @@ const getBudgetAlert = async (userId, category, transactionDate, amount) => {
   }
 };
 
-// POST /api/transactions
+/**
+ * Tính toán & áp dụng thay đổi số dư lên ví (khi sửa/xóa giao dịch).
+ * @param {Object} txInfo { type, amount, walletId, destinationWalletId }
+ * @param {boolean} revert true khi cần hoàn tác lại giao dịch
+ */
+const adjustWalletBalances = async ({ type, amount, walletId, destinationWalletId }, revert = false) => {
+  const numericAmount = Number(amount);
+  if (!numericAmount || numericAmount <= 0) return;
+
+  if (type === 'expense') {
+    const delta = revert ? numericAmount : -numericAmount;
+    await Wallet.findByIdAndUpdate(walletId, { $inc: { balance: delta } }, { new: true });
+  } else if (type === 'income') {
+    const delta = revert ? -numericAmount : numericAmount;
+    await Wallet.findByIdAndUpdate(walletId, { $inc: { balance: delta } }, { new: true });
+  } else if (type === 'transfer') {
+    const sourceDelta = revert ? numericAmount : -numericAmount;
+    const destDelta = revert ? -numericAmount : numericAmount;
+
+    await Wallet.findByIdAndUpdate(walletId, { $inc: { balance: sourceDelta } }, { new: true });
+    if (destinationWalletId) {
+      await Wallet.findByIdAndUpdate(destinationWalletId, { $inc: { balance: destDelta } }, { new: true });
+    }
+  }
+};
+
+// ──────────────────────────────────────────────
+// POST /api/transactions - Tạo giao dịch mới
+// ──────────────────────────────────────────────
 exports.create = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -198,6 +227,268 @@ exports.create = async (req, res) => {
       if (budgetAlert) body.budgetAlert = budgetAlert;
     }
     return res.status(201).json(body);
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Lỗi server: ' + error.message });
+  }
+};
+
+// ──────────────────────────────────────────────
+// GET /api/transactions - Danh sách giao dịch
+// ──────────────────────────────────────────────
+exports.list = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { walletId, categoryId, type, month, startDate, endDate, page = 1, limit = 20 } = req.query;
+
+    const filter = { userId };
+
+    if (type && ALL_TYPES.includes(type)) {
+      filter.type = type;
+    }
+    if (walletId && mongoose.Types.ObjectId.isValid(walletId)) {
+      filter.$or = [{ walletId }, { destinationWalletId: walletId }];
+    }
+    if (categoryId && mongoose.Types.ObjectId.isValid(categoryId)) {
+      filter.categoryId = categoryId;
+    }
+
+    // Lọc theo tháng YYYY-MM
+    if (month && /^\d{4}-\d{2}$/.test(month)) {
+      const [year, m] = month.split('-').map(Number);
+      const start = new Date(Date.UTC(year, m - 1, 1, 0, 0, 0));
+      const end = new Date(Date.UTC(year, m, 0, 23, 59, 59, 999));
+      filter.transactionDate = { $gte: start, $lte: end };
+    } else if (startDate || endDate) {
+      filter.transactionDate = {};
+      if (startDate) filter.transactionDate.$gte = new Date(startDate);
+      if (endDate) filter.transactionDate.$lte = new Date(endDate);
+    }
+
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+    const skip = (pageNum - 1) * limitNum;
+
+    const total = await Transaction.countDocuments(filter);
+    const transactions = await Transaction.find(filter)
+      .sort({ transactionDate: -1, createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum)
+      .populate('walletId', 'name type currency')
+      .populate('destinationWalletId', 'name type currency')
+      .populate('categoryId', 'name icon color type')
+      .lean();
+
+    return res.json({
+      success: true,
+      data: transactions,
+      pagination: {
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum) || 1,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Lỗi server: ' + error.message });
+  }
+};
+
+// ──────────────────────────────────────────────
+// GET /api/transactions/:id - Chi tiết giao dịch
+// ──────────────────────────────────────────────
+exports.getById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'ID giao dịch không hợp lệ.' });
+    }
+
+    const transaction = await Transaction.findOne({ _id: id, userId: req.user.id })
+      .populate('walletId', 'name type currency')
+      .populate('destinationWalletId', 'name type currency')
+      .populate('categoryId', 'name icon color type')
+      .lean();
+
+    if (!transaction) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy giao dịch.' });
+    }
+
+    return res.json({ success: true, data: transaction });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Lỗi server: ' + error.message });
+  }
+};
+
+// ──────────────────────────────────────────────
+// PUT /api/transactions/:id - Cập nhật giao dịch
+// ──────────────────────────────────────────────
+exports.update = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'ID giao dịch không hợp lệ.' });
+    }
+
+    const transaction = await Transaction.findOne({ _id: id, userId });
+    if (!transaction) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy giao dịch.' });
+    }
+
+    const {
+      amount,
+      type,
+      walletId,
+      categoryId,
+      destinationWalletId,
+      transactionDate,
+      note,
+      receiptImageUrl,
+    } = req.body;
+
+    const newAmount = amount !== undefined ? Number(amount) : transaction.amount;
+    const newType = type !== undefined ? type : transaction.type;
+    const newWalletId = walletId !== undefined ? walletId : transaction.walletId;
+    const newDestWalletId = destinationWalletId !== undefined ? destinationWalletId : transaction.destinationWalletId;
+
+    if (isNaN(newAmount) || newAmount <= 0) {
+      return res.status(400).json({ success: false, message: 'Số tiền phải lớn hơn 0.' });
+    }
+    if (!ALL_TYPES.includes(newType)) {
+      return res.status(400).json({ success: false, message: 'Loại giao dịch không hợp lệ.' });
+    }
+
+    // Kiểm tra ví mới nếu có thay đổi
+    if (walletId && mongoose.Types.ObjectId.isValid(walletId)) {
+      const w = await Wallet.findOne({ _id: walletId, userId });
+      if (!w) return res.status(404).json({ success: false, message: 'Không tìm thấy ví đã chọn.' });
+    }
+
+    // 1. Hoàn tác tác động số dư cũ
+    await adjustWalletBalances(
+      {
+        type: transaction.type,
+        amount: transaction.amount,
+        walletId: transaction.walletId,
+        destinationWalletId: transaction.destinationWalletId,
+      },
+      true // revert = true
+    );
+
+    // 2. Áp dụng tác động số dư mới
+    await adjustWalletBalances(
+      {
+        type: newType,
+        amount: newAmount,
+        walletId: newWalletId,
+        destinationWalletId: newDestWalletId,
+      },
+      false // apply = true
+    );
+
+    // 3. Cập nhật các trường
+    transaction.amount = newAmount;
+    transaction.type = newType;
+    transaction.walletId = newWalletId;
+    transaction.destinationWalletId = newDestWalletId;
+    if (categoryId !== undefined) transaction.categoryId = categoryId;
+    if (transactionDate) transaction.transactionDate = new Date(transactionDate);
+    if (note !== undefined) transaction.note = typeof note === 'string' ? note.trim() : '';
+    if (receiptImageUrl !== undefined) transaction.receiptImageUrl = receiptImageUrl;
+
+    await transaction.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Cập nhật giao dịch thành công!',
+      data: transaction,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Lỗi server: ' + error.message });
+  }
+};
+
+// ──────────────────────────────────────────────
+// DELETE /api/transactions/:id - Xóa giao dịch
+// ──────────────────────────────────────────────
+exports.remove = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'ID giao dịch không hợp lệ.' });
+    }
+
+    const transaction = await Transaction.findOne({ _id: id, userId });
+    if (!transaction) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy giao dịch.' });
+    }
+
+    // Hoàn tác lại số dư
+    await adjustWalletBalances(
+      {
+        type: transaction.type,
+        amount: transaction.amount,
+        walletId: transaction.walletId,
+        destinationWalletId: transaction.destinationWalletId,
+      },
+      true // revert = true
+    );
+
+    await transaction.deleteOne();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Xóa giao dịch thành công và đã hoàn tất khôi phục số dư ví!',
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Lỗi server: ' + error.message });
+  }
+};
+
+// ──────────────────────────────────────────────
+// GET /api/transactions/summary - Tổng thu, chi, dòng tiền ròng
+// ──────────────────────────────────────────────
+exports.summary = async (req, res) => {
+  try {
+    const userId = new mongoose.Types.ObjectId(req.user.id);
+    const { month } = req.query;
+
+    const match = { userId };
+    if (month && /^\d{4}-\d{2}$/.test(month)) {
+      const [year, m] = month.split('-').map(Number);
+      const start = new Date(Date.UTC(year, m - 1, 1, 0, 0, 0));
+      const end = new Date(Date.UTC(year, m, 0, 23, 59, 59, 999));
+      match.transactionDate = { $gte: start, $lte: end };
+    }
+
+    const stats = await Transaction.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: '$type',
+          totalAmount: { $sum: '$amount' },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    let totalIncome = 0;
+    let totalExpense = 0;
+
+    stats.forEach((item) => {
+      if (item._id === 'income') totalIncome = item.totalAmount;
+      if (item._id === 'expense') totalExpense = item.totalAmount;
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        totalIncome,
+        totalExpense,
+        netCashFlow: totalIncome - totalExpense,
+      },
+    });
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Lỗi server: ' + error.message });
   }

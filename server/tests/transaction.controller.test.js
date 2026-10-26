@@ -1,5 +1,12 @@
 /**
- * Unit test cho API tạo giao dịch (controller). Model được mock, không cần MongoDB.
+ * Unit test cho Transaction Controller.
+ * Bao gồm:
+ * 1. Test tạo giao dịch (create) với logic kiểm tra số dư nguyên tử, ví mặc định, danh mục "Khác" và cảnh báo ngân sách.
+ * 2. Test sửa giao dịch (update) với hoàn tác và áp dụng số dư.
+ * 3. Test xóa giao dịch (remove) với khôi phục số dư.
+ * 4. Test danh sách & phân trang (list).
+ * 5. Test chi tiết giao dịch (getById).
+ * 6. Test tổng hợp dòng tiền (summary).
  */
 const mongoose = require('mongoose');
 
@@ -7,10 +14,19 @@ jest.mock('../src/models/Category', () => ({ findOne: jest.fn() }));
 jest.mock('../src/models/Wallet', () => ({
   findOne: jest.fn(),
   findOneAndUpdate: jest.fn(),
+  findByIdAndUpdate: jest.fn(),
   updateOne: jest.fn(),
   create: jest.fn(),
 }));
-jest.mock('../src/models/Transaction', () => ({ create: jest.fn(), aggregate: jest.fn() }));
+jest.mock('../src/models/Transaction', () => ({
+  create: jest.fn(),
+  aggregate: jest.fn(),
+  find: jest.fn(),
+  findById: jest.fn(),
+  findOne: jest.fn(),
+  deleteOne: jest.fn(),
+  countDocuments: jest.fn(),
+}));
 jest.mock('../src/models/Budget', () => ({ findOne: jest.fn() }));
 
 const Category = require('../src/models/Category');
@@ -21,11 +37,16 @@ const ctrl = require('../src/controllers/transaction.controller');
 
 const newId = () => new mongoose.Types.ObjectId().toString();
 const USER_ID = newId();
+const WALLET_ID = newId();
+const DEST_WALLET_ID = newId();
 
-// Query giả: hỗ trợ .sort().lean() và await trực tiếp
+// Query giả: hỗ trợ .sort().skip().limit().populate().lean() và await trực tiếp
 const query = (value) => {
   const q = {
     sort: () => q,
+    skip: () => q,
+    limit: () => q,
+    populate: () => q,
     lean: () => q,
     then: (resolve, reject) => Promise.resolve(value).then(resolve, reject),
   };
@@ -38,6 +59,7 @@ const mockRes = () => {
   res.json = jest.fn().mockReturnValue(res);
   return res;
 };
+
 const body = (res) => res.json.mock.calls[0][0];
 
 const makeCategory = (o = {}) => ({
@@ -46,13 +68,41 @@ const makeCategory = (o = {}) => ({
   name: 'Ăn uống',
   type: 'expense',
   isDefault: false,
+  isDeleted: false,
   ...o,
 });
-const makeWallet = (o = {}) => ({ _id: newId(), userId: USER_ID, balance: 1000000, ...o });
 
-const mockReq = (b = {}) => ({
+const makeWallet = (o = {}) => ({
+  _id: WALLET_ID,
+  userId: USER_ID,
+  name: 'Ví tiền mặt',
+  balance: 1000000,
+  isArchived: false,
+  isExcludedFromNetWorth: false,
+  ...o,
+});
+
+const makeTransaction = (overrides = {}) => ({
+  _id: newId(),
+  userId: USER_ID,
+  walletId: WALLET_ID,
+  categoryId: newId(),
+  destinationWalletId: null,
+  amount: 50000,
+  type: 'expense',
+  transactionDate: new Date(),
+  note: 'Ăn phở sáng',
+  save: jest.fn().mockResolvedValue(undefined),
+  deleteOne: jest.fn().mockResolvedValue(undefined),
+  ...overrides,
+});
+
+const mockReq = (b = {}, overrides = {}) => ({
   user: { id: USER_ID },
+  params: {},
+  query: {},
   body: { type: 'expense', categoryId: newId(), amount: 50000, ...b },
+  ...overrides,
 });
 
 // Thiết lập "đường thành công" mặc định
@@ -72,6 +122,9 @@ beforeEach(() => {
   jest.resetAllMocks();
 });
 
+// ──────────────────────────────────────────────
+// 1. TẠO GIAO DỊCH (POST /api/transactions)
+// ──────────────────────────────────────────────
 describe('validate đầu vào', () => {
   it.each([
     ['type sai', { type: 'transfer' }],
@@ -357,5 +410,223 @@ describe('cảnh báo ngân sách', () => {
     await ctrl.create(mockReq(), res);
     expect(res.status).toHaveBeenCalledWith(201);
     expect(body(res).budgetAlert).toBeUndefined();
+  });
+});
+
+// ──────────────────────────────────────────────
+// 2. SỬA GIAO DỊCH (PUT /api/transactions/:id)
+// ──────────────────────────────────────────────
+describe('update transaction & balance adjustments', () => {
+  it('giao dịch không tồn tại -> 404', async () => {
+    Transaction.findOne.mockResolvedValue(null);
+    const res = mockRes();
+    await ctrl.update(mockReq({}, { params: { id: newId() }, body: { amount: 100000 } }), res);
+    expect(res.status).toHaveBeenCalledWith(404);
+  });
+
+  it('sửa số tiền expense: hoàn tác số tiền cũ (+50k), trừ số tiền mới (-80k)', async () => {
+    const oldTx = makeTransaction({
+      amount: 50000,
+      type: 'expense',
+      walletId: WALLET_ID,
+    });
+    Transaction.findOne.mockResolvedValue(oldTx);
+    Wallet.findOne.mockResolvedValue(makeWallet());
+    Wallet.findByIdAndUpdate.mockResolvedValue(makeWallet());
+
+    const res = mockRes();
+    await ctrl.update(
+      mockReq({}, {
+        params: { id: String(oldTx._id) },
+        body: { amount: 80000 },
+      }),
+      res
+    );
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    const calls = Wallet.findByIdAndUpdate.mock.calls.filter((c) => c[0] === WALLET_ID);
+    const totalDelta = calls.reduce((sum, c) => sum + c[1].$inc.balance, 0);
+    expect(totalDelta).toBe(-30000);
+    expect(oldTx.save).toHaveBeenCalled();
+  });
+
+  it('sửa ví nguồn expense: hoàn tác ví cũ (+50k), trừ ví mới (-50k)', async () => {
+    const NEW_WALLET_ID = newId();
+    const oldTx = makeTransaction({
+      amount: 50000,
+      type: 'expense',
+      walletId: WALLET_ID,
+    });
+    Transaction.findOne.mockResolvedValue(oldTx);
+    Wallet.findOne
+      .mockResolvedValueOnce(makeWallet({ _id: NEW_WALLET_ID }))
+      .mockResolvedValue(makeWallet());
+
+    const res = mockRes();
+    await ctrl.update(
+      mockReq({}, {
+        params: { id: String(oldTx._id) },
+        body: { walletId: NEW_WALLET_ID },
+      }),
+      res
+    );
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(Wallet.findByIdAndUpdate).toHaveBeenCalledWith(
+      WALLET_ID,
+      { $inc: { balance: 50000 } },
+      { new: true }
+    );
+    expect(Wallet.findByIdAndUpdate).toHaveBeenCalledWith(
+      NEW_WALLET_ID,
+      { $inc: { balance: -50000 } },
+      { new: true }
+    );
+  });
+});
+
+// ──────────────────────────────────────────────
+// 3. XÓA GIAO DỊCH (DELETE /api/transactions/:id)
+// ──────────────────────────────────────────────
+describe('remove transaction & balance rollback', () => {
+  it('xóa expense: hoàn tác lại số dư ví (+amount)', async () => {
+    const tx = makeTransaction({
+      amount: 70000,
+      type: 'expense',
+      walletId: WALLET_ID,
+    });
+    Transaction.findOne.mockResolvedValue(tx);
+    Wallet.findByIdAndUpdate.mockResolvedValue(makeWallet());
+
+    const res = mockRes();
+    await ctrl.remove(mockReq({}, { params: { id: String(tx._id) } }), res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(Wallet.findByIdAndUpdate).toHaveBeenCalledWith(
+      WALLET_ID,
+      { $inc: { balance: 70000 } },
+      { new: true }
+    );
+    expect(tx.deleteOne).toHaveBeenCalled();
+  });
+
+  it('xóa income: hoàn tác lại số dư ví (-amount)', async () => {
+    const tx = makeTransaction({
+      amount: 5000000,
+      type: 'income',
+      walletId: WALLET_ID,
+    });
+    Transaction.findOne.mockResolvedValue(tx);
+    Wallet.findByIdAndUpdate.mockResolvedValue(makeWallet());
+
+    const res = mockRes();
+    await ctrl.remove(mockReq({}, { params: { id: String(tx._id) } }), res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(Wallet.findByIdAndUpdate).toHaveBeenCalledWith(
+      WALLET_ID,
+      { $inc: { balance: -5000000 } },
+      { new: true }
+    );
+    expect(tx.deleteOne).toHaveBeenCalled();
+  });
+
+  it('xóa transfer: hoàn tác ví nguồn (+amount), hoàn tác ví đích (-amount)', async () => {
+    const tx = makeTransaction({
+      amount: 300000,
+      type: 'transfer',
+      walletId: WALLET_ID,
+      destinationWalletId: DEST_WALLET_ID,
+    });
+    Transaction.findOne.mockResolvedValue(tx);
+    Wallet.findByIdAndUpdate.mockResolvedValue(makeWallet());
+
+    const res = mockRes();
+    await ctrl.remove(mockReq({}, { params: { id: String(tx._id) } }), res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(Wallet.findByIdAndUpdate).toHaveBeenCalledWith(
+      WALLET_ID,
+      { $inc: { balance: 300000 } },
+      { new: true }
+    );
+    expect(Wallet.findByIdAndUpdate).toHaveBeenCalledWith(
+      DEST_WALLET_ID,
+      { $inc: { balance: -300000 } },
+      { new: true }
+    );
+    expect(tx.deleteOne).toHaveBeenCalled();
+  });
+});
+
+// ──────────────────────────────────────────────
+// 4. DANH SÁCH & PHÂN TRANG (GET /api/transactions)
+// ──────────────────────────────────────────────
+describe('list transactions', () => {
+  it('trả danh sách giao dịch phân trang và lọc theo tháng', async () => {
+    const list = [makeTransaction(), makeTransaction()];
+    Transaction.countDocuments.mockResolvedValue(2);
+    Transaction.find.mockReturnValue(query(list));
+
+    const res = mockRes();
+    await ctrl.list(mockReq({}, { query: { month: '2026-10', page: 1, limit: 10 } }), res);
+
+    expect(body(res).success).toBe(true);
+    expect(body(res).data).toHaveLength(2);
+    expect(body(res).pagination).toMatchObject({
+      total: 2,
+      page: 1,
+      limit: 10,
+      totalPages: 1,
+    });
+  });
+});
+
+// ──────────────────────────────────────────────
+// 5. CHI TIẾT GIAO DỊCH (GET /api/transactions/:id)
+// ──────────────────────────────────────────────
+describe('getById transaction', () => {
+  it('id sai định dạng -> 400', async () => {
+    const res = mockRes();
+    await ctrl.getById(mockReq({}, { params: { id: 'invalid-id' } }), res);
+    expect(res.status).toHaveBeenCalledWith(400);
+  });
+
+  it('không tìm thấy -> 404', async () => {
+    Transaction.findOne.mockReturnValue(query(null));
+    const res = mockRes();
+    await ctrl.getById(mockReq({}, { params: { id: newId() } }), res);
+    expect(res.status).toHaveBeenCalledWith(404);
+  });
+
+  it('tìm thấy -> trả thông tin chi tiết', async () => {
+    const tx = makeTransaction();
+    Transaction.findOne.mockReturnValue(query(tx));
+    const res = mockRes();
+    await ctrl.getById(mockReq({}, { params: { id: String(tx._id) } }), res);
+    expect(body(res).success).toBe(true);
+    expect(body(res).data).toHaveProperty('amount', 50000);
+  });
+});
+
+// ──────────────────────────────────────────────
+// 6. TỔNG KẾT DÒNG TIỀN (GET /api/transactions/summary)
+// ──────────────────────────────────────────────
+describe('summary cash flow', () => {
+  it('tổng hợp thu nhập, chi tiêu và dòng tiền ròng', async () => {
+    Transaction.aggregate.mockResolvedValue([
+      { _id: 'income', totalAmount: 15000000, count: 2 },
+      { _id: 'expense', totalAmount: 4500000, count: 12 },
+    ]);
+
+    const res = mockRes();
+    await ctrl.summary(mockReq({}, { query: { month: '2026-10' } }), res);
+
+    expect(body(res).success).toBe(true);
+    expect(body(res).data).toEqual({
+      totalIncome: 15000000,
+      totalExpense: 4500000,
+      netCashFlow: 10500000,
+    });
   });
 });

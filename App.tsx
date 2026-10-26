@@ -1,33 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuthStore } from './src/store/useAuthStore';
 import WelcomeScreen from './src/screens/auth/WelcomeScreen';
 import LoginScreen from './src/screens/auth/LoginScreen';
 import RegisterScreen from './src/screens/auth/RegisterScreen';
 import SuccessScreen from './src/screens/auth/SuccessScreen';
-import HomeScreen from './src/screens/dashboard/HomeScreen';
+import FinancialCenterScreen from './src/screens/dashboard/FinancialCenterScreen';
 
 type ScreenType = 'welcome' | 'login' | 'register' | 'success' | 'home';
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<ScreenType>('welcome');
   const [successUsername, setSuccessUsername] = useState<string>('');
-  const { user, isLoading, loadSession } = useAuthStore();
+  const { isLoading, loadSession } = useAuthStore();
 
   useEffect(() => {
     loadSession();
   }, [loadSession]);
-
-  useEffect(() => {
-    if (!isLoading) {
-      if (user) {
-        setCurrentScreen('home');
-      } else {
-        setCurrentScreen('welcome');
-      }
-    }
-  }, [isLoading, user]);
 
   if (isLoading) {
     return (
@@ -49,13 +40,15 @@ export default function App() {
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaProvider style={styles.container}>
       <StatusBar style="dark" />
 
+      {/* 1. Màn hình mở đầu (Onboarding) chuẩn mascot chú gấu cầm tiền */}
       {currentScreen === 'welcome' && (
         <WelcomeScreen onStart={() => setCurrentScreen('login')} />
       )}
 
+      {/* 2. Màn hình Đăng nhập (Login) */}
       {currentScreen === 'login' && (
         <LoginScreen
           onNavigateToRegister={() => setCurrentScreen('register')}
@@ -63,6 +56,7 @@ export default function App() {
         />
       )}
 
+      {/* 3. Màn hình Đăng ký (Register) */}
       {currentScreen === 'register' && (
         <RegisterScreen
           onNavigateToLogin={() => setCurrentScreen('login')}
@@ -70,6 +64,7 @@ export default function App() {
         />
       )}
 
+      {/* 4. Màn hình Đăng nhập thành công với Mascot nhảy vui mừng */}
       {currentScreen === 'success' && (
         <SuccessScreen
           username={successUsername}
@@ -77,10 +72,11 @@ export default function App() {
         />
       )}
 
+      {/* 5. Màn hình Trung tâm tài chính chính */}
       {currentScreen === 'home' && (
-        <HomeScreen onLogout={() => setCurrentScreen('welcome')} />
+        <FinancialCenterScreen onLogout={() => setCurrentScreen('welcome')} />
       )}
-    </View>
+    </SafeAreaProvider>
   );
 }
 

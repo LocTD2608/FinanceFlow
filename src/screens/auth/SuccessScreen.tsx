@@ -1,42 +1,53 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView } from 'react-native';
-import { THEME } from '../../constants/theme';
-import { CheckCircle2, Sparkles } from 'lucide-react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Image,
+  Dimensions,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
+const { width } = Dimensions.get('window');
+
+// Mascot chú gấu nhảy vui mừng cùng bạn nhỏ với các ngôi sao vàng
+const MASCOT_SUCCESS = require('../../../assets/mascot_success.png');
 
 interface Props {
   username?: string;
   onContinue: () => void;
 }
 
-export default function SuccessScreen({ username, onContinue }: Props) {
+export default function SuccessScreen({ onContinue }: Props) {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
-        {/* Floating Card màu xanh nhạt theo bản vẽ Figma */}
+        {/* Card xanh pastel chuẩn theo hình mockup */}
         <View style={styles.card}>
           <Text style={styles.title}>Đăng nhập{'\n'}thành công!</Text>
 
-          {/* Vùng ảnh ăn mừng cute (Thay bằng ảnh chibi thật sau) */}
+          {/* Vùng ảnh mascot gấu vui mừng */}
           <View style={styles.illustrationWrapper}>
-            <Text style={styles.celebrationEmoji}>🎉🐻🥳</Text>
-            <View style={styles.checkBadge}>
-              <CheckCircle2 size={32} color="#059669" />
-              <Sparkles size={20} color="#F59E0B" style={styles.sparkle} />
-            </View>
+            <Image
+              source={MASCOT_SUCCESS}
+              style={styles.mascotImage}
+              resizeMode="contain"
+            />
           </View>
 
-          {username ? (
-            <Text style={styles.welcomeUser}>Xin chào, <Text style={styles.boldUser}>{username}</Text>!</Text>
-          ) : null}
-
-          {/* Hướng dẫn tiếp tục chuẩn text Figma */}
+          {/* Hướng dẫn tiếp tục chuẩn text mockup */}
           <Text style={styles.subtitle}>
             Chọn Tiếp tục để bắt đầu{'\n'}quản lý tài chính của bạn
           </Text>
         </View>
 
-        {/* Nút Tiếp tục chuẩn Figma */}
-        <TouchableOpacity style={styles.button} activeOpacity={0.8} onPress={onContinue}>
+        {/* Nút Tiếp tục hình viên thuốc bo tròn */}
+        <TouchableOpacity
+          style={styles.button}
+          activeOpacity={0.8}
+          onPress={onContinue}
+        >
           <Text style={styles.buttonText}>Tiếp tục</Text>
         </TouchableOpacity>
       </View>
@@ -47,7 +58,7 @@ export default function SuccessScreen({ username, onContinue }: Props) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: THEME.colors.background,
+    backgroundColor: '#FFFFFF',
   },
   content: {
     flex: 1,
@@ -57,78 +68,61 @@ const styles = StyleSheet.create({
   },
   card: {
     width: '100%',
-    maxWidth: 360,
-    backgroundColor: THEME.colors.cardTint, // Nền xanh nhạt #E0F2FE chuẩn Figma
-    borderRadius: THEME.borderRadius.card,
+    maxWidth: 340,
+    backgroundColor: '#D8F1FE', // Nền xanh pastel chuẩn ảnh 5
+    borderRadius: 24,
     paddingHorizontal: 24,
-    paddingVertical: 36,
+    paddingTop: 32,
+    paddingBottom: 28,
     alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: '#BAE6FD',
-    marginBottom: 36,
-    ...THEME.shadow,
+    shadowColor: '#0284C7',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 4,
+    marginBottom: 32,
   },
   title: {
     fontSize: 26,
-    fontWeight: '800',
-    color: THEME.colors.textPrimary,
+    fontWeight: '900',
+    color: '#000000',
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
     lineHeight: 34,
   },
   illustrationWrapper: {
-    marginVertical: 16,
+    marginVertical: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    position: 'relative',
   },
-  celebrationEmoji: {
-    fontSize: 56,
-  },
-  checkBadge: {
-    position: 'absolute',
-    bottom: -6,
-    right: -10,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 2,
-    flexDirection: 'row',
-    alignItems: 'center',
-    elevation: 3,
-  },
-  sparkle: {
-    marginLeft: 2,
-  },
-  welcomeUser: {
-    fontSize: 16,
-    color: '#0F172A',
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  boldUser: {
-    fontWeight: '800',
-    color: '#0284C7',
+  mascotImage: {
+    width: 200,
+    height: 200,
   },
   subtitle: {
-    fontSize: 14,
-    color: '#334155',
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#000000',
     textAlign: 'center',
-    lineHeight: 22,
-    marginTop: 8,
+    marginTop: 14,
+    lineHeight: 20,
   },
   button: {
-    width: '60%',
-    maxWidth: 240,
-    height: 52,
-    backgroundColor: THEME.colors.primary,
-    borderRadius: THEME.borderRadius.button,
+    width: 170,
+    height: 48,
+    backgroundColor: '#CFF0FC', // Nền xanh nhạt
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    ...THEME.shadow,
+    shadowColor: '#0284C7',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 3,
   },
   buttonText: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: THEME.colors.primaryText,
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#000000',
   },
 });

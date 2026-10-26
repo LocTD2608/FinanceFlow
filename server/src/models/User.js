@@ -11,7 +11,24 @@ const userSchema = new mongoose.Schema(
     },
     passwordHash: {
       type: String,
-      required: [true, 'Password hash là bắt buộc'],
+      required: [
+        function () {
+          return !this.authProvider || this.authProvider === 'local';
+        },
+        'Password hash là bắt buộc',
+      ],
+    },
+    authProvider: {
+      type: String,
+      enum: {
+        values: ['local', 'google', 'apple', 'facebook'],
+        message: '{VALUE} không phải là authProvider hợp lệ',
+      },
+      default: 'local',
+    },
+    oauthId: {
+      type: String,
+      default: null,
     },
     nickname: {
       type: String,
@@ -62,7 +79,7 @@ const userSchema = new mongoose.Schema(
 );
 
 // Index
-// email unique index đã được khai báo qua { unique: true } trong schema → không cần .index() thêm
-userSchema.index({ phone: 1 }, { sparse: true }); // sparse vì phone có thể null/empty
+userSchema.index({ phone: 1 }, { sparse: true });
+userSchema.index({ oauthId: 1 }, { sparse: true });
 
 module.exports = mongoose.model('User', userSchema);
