@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 
+// Connect to MongoDB
 const connectDB = require('./config/db');
 const authRoutes = require('./routes/auth.routes');
 const categoryRoutes = require('./routes/category.routes');
@@ -9,6 +10,9 @@ const dashboardRoutes = require('./routes/dashboard.routes');
 const transactionRoutes = require('./routes/transaction.routes');
 const walletRoutes = require('./routes/wallet.routes');
 const budgetRoutes = require('./routes/budget.routes');
+const paymentRoutes = require('./routes/payment.routes');
+const netWorthRoutes = require('./routes/netWorth.routes');
+const billReminderRoutes = require('./routes/billReminder.routes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -38,6 +42,15 @@ app.use('/api/budgets', budgetRoutes);
 // 6. Thống kê Dashboard (tổng thu/chi, số dư, biểu đồ theo danh mục)
 app.use('/api/dashboard', dashboardRoutes);
 
+// 7. Thanh toán QR có xác thực OTP qua email
+app.use('/api/payments', paymentRoutes);
+
+// 8. Tài sản ròng theo tháng (snapshot)
+app.use('/api/networth', netWorthRoutes);
+
+// 9. Nhắc hóa đơn định kỳ
+app.use('/api/bill-reminders', billReminderRoutes);
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ success: true, message: 'FinanceFlow API đang hoạt động ✅', env: process.env.NODE_ENV });
@@ -48,6 +61,10 @@ app.get('/api/health', (req, res) => {
 // ──────────────────────────────────────────────
 const start = async () => {
   await connectDB(); // Kết nối MongoDB trước khi mở cổng
+  if (process.env.ENABLE_CRON !== 'false') {
+    require('./jobs/netWorth.job').start();
+    require('./jobs/billReminder.job').start();
+  }
   app.listen(PORT, () => {
     console.log(`🚀 FinanceFlow Backend đang chạy tại http://localhost:${PORT}`);
   });

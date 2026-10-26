@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, LogBox } from 'react-native';
+
+// Bỏ qua cảnh báo thông báo đẩy của Expo Go trên Android để không hiện thanh vàng
+LogBox.ignoreLogs(['[expo-notifications]']);
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuthStore } from './src/store/useAuthStore';
@@ -8,17 +11,23 @@ import LoginScreen from './src/screens/auth/LoginScreen';
 import RegisterScreen from './src/screens/auth/RegisterScreen';
 import SuccessScreen from './src/screens/auth/SuccessScreen';
 import FinancialCenterScreen from './src/screens/dashboard/FinancialCenterScreen';
+import { registerForPushNotifications } from './src/utils/pushNotifications';
 
 type ScreenType = 'welcome' | 'login' | 'register' | 'success' | 'home';
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<ScreenType>('welcome');
   const [successUsername, setSuccessUsername] = useState<string>('');
-  const { isLoading, loadSession } = useAuthStore();
+  const { isLoading, loadSession, token } = useAuthStore();
 
   useEffect(() => {
     loadSession();
   }, [loadSession]);
+
+  // Đăng ký nhận thông báo nhắc hóa đơn khi đã đăng nhập (chỉ thiết bị thật)
+  useEffect(() => {
+    if (currentScreen === 'home' && token) registerForPushNotifications(token);
+  }, [currentScreen, token]);
 
   if (isLoading) {
     return (

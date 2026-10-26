@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Modal,
   View,
@@ -19,6 +19,9 @@ import { THEME } from '../../constants/theme';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useTransactionStore } from '../../store/useTransactionStore';
 import { TransactionType } from '../../api/transaction';
+import { walletApi, WalletItem } from '../../api/wallet';
+import { categoryApi, CategoryItemData } from '../../api/category';
+import TopupModal from '../../components/TopupModal';
 
 interface Props {
   visible: boolean;
@@ -35,6 +38,37 @@ export default function AddTransactionModal({ visible, onClose, onSuccess }: Pro
   const [note, setNote] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const [wallet, setWallet] = useState<WalletItem | null>(null);
+  const [categories, setCategories] = useState<CategoryItemData[]>([]);
+  const [categoryId, setCategoryId] = useState('');
+  const [topupVisible, setTopupVisible] = useState(false);
+  const [shortfall, setShortfall] = useState(0);
+
+  // Ví mặc định thật từ server (không dùng id cứng)
+  useEffect(() => {
+    if (!visible) return;
+    walletApi.getDefaultWallet(token || undefined).then(setWallet);
+  }, [visible, token]);
+
+  // Danh mục theo loại giao dịch
+  useEffect(() => {
+    if (!visible) return;
+    setCategoryId('');
+    const kind = type === 'income' ? 'income' : 'expense';
+    categoryApi.getCategories(token || undefined, kind).then((res) => {
+      if (res?.success && Array.isArray(res.data)) setCategories(res.data);
+    });
+  }, [visible, type, token]);
+
+  const selectedCategory = categories.find((c) => (c._id || c.id) === categoryId);
+  const noteRequired = !!selectedCategory && /^Khác/.test(selectedCategory.name);
+
+  const resetForm = () => {
+    setAmountStr('');
+    setNote('');
+    setCategoryId('');
+  };
+
   const handleSubmit = async () => {
     Keyboard.dismiss();
     const amount = Number(amountStr.replace(/[^0-9]/g, ''));
@@ -42,25 +76,54 @@ export default function AddTransactionModal({ visible, onClose, onSuccess }: Pro
       Alert.alert('Lỗi', 'Vui lòng nhập số tiền hợp lệ (> 0 đ).');
       return;
     }
+    if (!categoryId) {
+      Alert.alert('Lỗi', 'Vui lòng chọn danh mục.');
+      return;
+    }
+    if (noteRequired && (!note.trim() || note.trim().length > 50)) {
+      Alert.alert('Lỗi', 'Danh mục "Khác" bắt buộc ghi chú (tối đa 50 ký tự).');
+      return;
+    }
+    if (!wallet) {
+      Alert.alert('Lỗi', 'Chưa tải được ví. Vui lòng thử lại.');
+      return;
+    }
 
     setIsSubmitting(true);
     try {
-      // Dùng default wallet id (nếu chưa chọn ví cụ thể)
-      const defaultWalletId = '660000000000000000000010';
       const result = await createTransaction(token || undefined, {
         amount,
         type,
-        walletId: defaultWalletId,
+        walletId: (wallet._id || wallet.id) as string,
+        categoryId,
         note: note.trim(),
         transactionDate: new Date().toISOString(),
       });
 
       if (result.success) {
         Alert.alert('Thành công', result.message);
-        setAmountStr('');
-        setNote('');
+        resetForm();
         onClose();
         if (onSuccess) onSuccess();
+      } else if (result.code === 'INSUFFICIENT_BALANCE') {
+        const missing = result.shortfall ?? amount;
+        if (typeof result.currentBalance === 'number') setWallet({ ...wallet, balance: result.currentBalance });
+        setShortfall(missing);
+        Alert.alert(
+          'Số dư không đủ',
+          `Ví còn thiếu ${missing.toLocaleString('vi-VN')} đ. Bạn có muốn nạp thêm không?`,
+          [
+            {
+              text: 'Hủy',
+              style: 'cancel',
+              onPress: () => {
+                resetForm();
+                onClose();
+              },
+            },
+            { text: 'Nạp thêm', onPress: () => setTopupVisible(true) },
+          ]
+        );
       } else {
         Alert.alert('Lỗi', result.message);
       }
@@ -139,6 +202,31 @@ export default function AddTransactionModal({ visible, onClose, onSuccess }: Pro
                     </TouchableOpacity>
                   </View>
 
+                  {!!wallet && (
+                    <Text style={styles.walletInfo}>
+                      {wallet.name} • Số dư {wallet.balance.toLocaleString('vi-VN')} đ
+                    </Text>
+                  )}
+
+                  {/* Danh mục */}
+                  <Text style={styles.inputLabel}>Danh mục</Text>
+                  <View style={styles.chipRow}>
+                    {categories.map((c) => {
+                      const id = (c._id || c.id) as string;
+                      const active = id === categoryId;
+                      return (
+                        <TouchableOpacity
+                          key={id}
+                          style={[styles.chip, active && styles.chipActive]}
+                          onPress={() => setCategoryId(id)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[styles.chipText, active && styles.chipTextActive]}>{c.name}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+
                   {/* Amount input & Toolbar Ẩn bàn phím */}
                   <View style={styles.labelRow}>
                     <Text style={styles.inputLabel}>Số tiền (VNĐ)</Text>
@@ -171,7 +259,7 @@ export default function AddTransactionModal({ visible, onClose, onSuccess }: Pro
                   />
 
                   {/* Note input */}
-                  <Text style={styles.inputLabel}>Ghi chú giao dịch</Text>
+                  <Text style={styles.inputLabel}>Ghi chú giao dịch{noteRequired ? ' *' : ''}</Text>
                   <TextInput
                     style={styles.textInput}
                     placeholder="Ví dụ: Ăn trưa, Đổ xăng, Tiền lương..."
@@ -211,6 +299,17 @@ export default function AddTransactionModal({ visible, onClose, onSuccess }: Pro
           </View>
         </TouchableWithoutFeedback>
       </KeyboardAvoidingView>
+      <TopupModal
+        visible={topupVisible}
+        token={token || undefined}
+        wallet={wallet}
+        suggestedAmount={shortfall}
+        onClose={() => setTopupVisible(false)}
+        onSuccess={(newBalance) => {
+          setTopupVisible(false);
+          if (wallet) setWallet({ ...wallet, balance: newBalance });
+        }}
+      />
     </Modal>
   );
 }
@@ -292,6 +391,40 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#475569',
+  },
+  walletInfo: {
+    fontSize: 12,
+    color: '#64748B',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 6,
+    marginBottom: 14,
+  },
+  chip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    backgroundColor: '#F8FAFC',
+  },
+  chipActive: {
+    backgroundColor: '#E0F2FE',
+    borderColor: '#0284C7',
+  },
+  chipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  chipTextActive: {
+    color: '#0369A1',
+    fontWeight: '700',
   },
   labelRow: {
     flexDirection: 'row',

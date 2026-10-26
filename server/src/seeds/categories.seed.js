@@ -24,8 +24,8 @@ const DEFAULT_CATEGORIES = [
   { name: 'Thưởng',          type: 'income',  icon: 'gift',           color: '#F59E0B', isDefault: true },
   { name: 'Đầu tư',          type: 'income',  icon: 'trending-up',    color: '#14B8A6', isDefault: true },
   { name: 'Kinh doanh',      type: 'income',  icon: 'store',          color: '#84CC16', isDefault: true },
-  { name: 'Tiền phụ thu',    type: 'income',  icon: 'wallet',         color: '#38BDF8', isDefault: true },
-  { name: 'Cho vay thu hồi', type: 'income',  icon: 'hand-coins',     color: '#A3E635', isDefault: true },
+  { name: 'Công việc phụ',  type: 'income',  icon: 'wallet',         color: '#38BDF8', isDefault: true },
+  { name: 'Vay mượn',        type: 'income',  icon: 'hand-coins',     color: '#A3E635', isDefault: true },
   { name: 'Khác (Thu)',      type: 'income',  icon: 'circle-ellipsis', color: '#6B7280', isDefault: true },
 ];
 

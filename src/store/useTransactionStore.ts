@@ -6,6 +6,16 @@ import {
   CashFlowSummary,
 } from '../api/transaction';
 
+// Kết quả tạo giao dịch; `code` = INSUFFICIENT_BALANCE kèm shortfall khi ví không đủ tiền
+export interface TransactionResult {
+  success: boolean;
+  message: string;
+  code?: string;
+  currentBalance?: number;
+  requiredAmount?: number;
+  shortfall?: number;
+}
+
 interface TransactionState {
   transactions: TransactionItem[];
   summary: CashFlowSummary;
@@ -14,7 +24,7 @@ interface TransactionState {
   setSelectedMonth: (month: string) => void;
   fetchTransactions: (token?: string, month?: string) => Promise<void>;
   fetchSummary: (token?: string, month?: string) => Promise<void>;
-  createTransaction: (token: string | undefined, input: CreateTransactionInput) => Promise<{ success: boolean; message: string }>;
+  createTransaction: (token: string | undefined, input: CreateTransactionInput) => Promise<TransactionResult>;
   deleteTransaction: (token: string | undefined, id: string) => Promise<{ success: boolean; message: string }>;
 }
 
@@ -70,7 +80,14 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
         await get().fetchSummary(token);
         return { success: true, message: res.message || 'Tạo giao dịch thành công!' };
       }
-      return { success: false, message: res.message || 'Không thể tạo giao dịch.' };
+      return {
+        success: false,
+        message: res.message || 'Không thể tạo giao dịch.',
+        code: res.code,
+        currentBalance: res.currentBalance,
+        requiredAmount: res.requiredAmount,
+        shortfall: res.shortfall,
+      };
     } catch (err: any) {
       return { success: false, message: err?.message || 'Lỗi kết nối khi tạo giao dịch.' };
     } finally {

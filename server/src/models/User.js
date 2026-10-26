@@ -71,6 +71,18 @@ const userSchema = new mongoose.Schema(
       enum: ['dark', 'light'],
       default: 'dark',
     },
+    // Expo push token của các thiết bị đã đăng nhập (để gửi nhắc hóa đơn)
+    pushTokens: {
+      type: [
+        {
+          _id: false,
+          token: { type: String, required: true },
+          platform: { type: String, default: 'unknown' },
+          updatedAt: { type: Date, default: Date.now },
+        },
+      ],
+      default: [],
+    },
   },
   {
     timestamps: true, // Tự động thêm createdAt & updatedAt

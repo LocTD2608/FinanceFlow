@@ -72,7 +72,7 @@ const getDemoData = async (categoryMap) => {
     // Thu
     { amount: 15000000, type: 'income',  categoryName: 'Lương',       note: 'Lương tháng 10',             daysAgo: 12 },
     { amount: 2000000,  type: 'income',  categoryName: 'Thưởng',     note: 'Thưởng dự án Q3',            daysAgo: 13 },
-    { amount: 500000,   type: 'income',  categoryName: 'Tiền phụ thu', note: 'Làm thêm freelance',       daysAgo: 16 },
+    { amount: 500000,   type: 'income',  categoryName: 'Công việc phụ', note: 'Làm thêm freelance',      daysAgo: 16 },
   ];
 
   // --- BUDGETS ---
