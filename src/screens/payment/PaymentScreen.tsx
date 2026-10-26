@@ -269,6 +269,15 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab, hideBotto
                 })}
               </View>
             </View>
+
+            {/* Nút Tiếp tục thanh toán */}
+            <TouchableOpacity
+              style={styles.continuePaymentBtn}
+              onPress={() => setStep('input')}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.continuePaymentBtnText}>Tiếp tục nhập số tiền</Text>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -869,6 +878,25 @@ const styles = StyleSheet.create({
   categoryLabelActive: {
     color: '#0284C7',
     fontWeight: '700',
+  },
+  continuePaymentBtn: {
+    backgroundColor: '#0284C7',
+    borderRadius: 18,
+    paddingVertical: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 6,
+    marginBottom: 8,
+    shadowColor: '#0284C7',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  continuePaymentBtnText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
   },
   accountHolderText: {
     fontSize: 14,

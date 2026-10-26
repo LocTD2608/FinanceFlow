@@ -298,7 +298,7 @@ export default function CreateBudgetScreen({ onBackToFinance, onNavigateToTab, h
                     {/* Box Số tiền ngân sách */}
                     <View style={styles.successBox}>
                       <Text style={styles.successBoxLabel}>Số tiền cho ngân sách:</Text>
-                      <Text style={styles.successAmount}>{amountStr || '4.000.000'}đ</Text>
+                      <Text style={styles.successAmount}>{amountStr || '4.000.000'} đ</Text>
                     </View>
 
                     {/* Box Danh mục áp dụng */}
@@ -314,19 +314,19 @@ export default function CreateBudgetScreen({ onBackToFinance, onNavigateToTab, h
                     {/* Hàng 2 Nút: Xác nhận & Chỉnh sửa */}
                     <View style={styles.successActionsRow}>
                       <TouchableOpacity
-                        style={styles.pillButton}
+                        style={[styles.pillButton, styles.pillButtonPrimary]}
                         activeOpacity={0.8}
                         onPress={handleConfirm}
                       >
-                        <Text style={styles.pillButtonText}>Xác nhận</Text>
+                        <Text style={styles.pillButtonTextPrimary}>Xác nhận</Text>
                       </TouchableOpacity>
 
                       <TouchableOpacity
-                        style={styles.pillButton}
+                        style={[styles.pillButton, styles.pillButtonSecondary]}
                         activeOpacity={0.8}
                         onPress={handleEdit}
                       >
-                        <Text style={styles.pillButtonText}>Chỉnh sửa</Text>
+                        <Text style={styles.pillButtonTextSecondary}>Chỉnh sửa</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -685,21 +685,38 @@ const styles = StyleSheet.create({
   },
   pillButton: {
     width: 135,
-    height: 44,
-    backgroundColor: '#D8F1FE',
-    borderRadius: 22,
+    height: 46,
+    borderRadius: 23,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#0284C7',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-    elevation: 2,
   },
-  pillButtonText: {
+  pillButtonPrimary: {
+    backgroundColor: '#0284C7',
+    shadowColor: '#0284C7',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  pillButtonTextPrimary: {
     fontSize: 14,
     fontWeight: '800',
-    color: '#000000',
+    color: '#FFFFFF',
+  },
+  pillButtonSecondary: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  pillButtonTextSecondary: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#475569',
   },
 
   /* ─── Bottom Navigation ─── */

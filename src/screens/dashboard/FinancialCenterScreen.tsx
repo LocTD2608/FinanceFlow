@@ -309,13 +309,15 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
                     <TouchableOpacity
                       onPress={() => setCurrentMonthIndex((m) => Math.max(1, m - 1))}
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      activeOpacity={0.7}
                     >
                       <ChevronLeft size={16} color="#334155" />
                     </TouchableOpacity>
-                    <Text style={styles.monthText}>{`< Tháng ${currentMonthIndex} >`}</Text>
+                    <Text style={styles.monthText}>{`Tháng ${currentMonthIndex}`}</Text>
                     <TouchableOpacity
                       onPress={() => setCurrentMonthIndex((m) => Math.min(12, m + 1))}
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      activeOpacity={0.7}
                     >
                       <ChevronRight size={16} color="#334155" />
                     </TouchableOpacity>
@@ -383,26 +385,20 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
               {/* Biểu đồ Donut Chart trung tâm */}
               <View style={styles.chartSection}>
                 <Svg width={300} height={300} viewBox="0 0 300 300">
-                  {/* 1. Mảng Trắng (Ăn uống): 0° đến 65° */}
-                  <Path d={describeDonutArc(cx, cy, innerR, outerR, 0, 65)} fill="#FFFFFF" />
+                  {/* 1. Mảng Trắng (Ăn uống): 0° đến angles.a1 */}
+                  <Path
+                    d={describeDonutArc(cx, cy, innerR, outerR, 0, Math.max(10, Math.min(350, angles.a1)))}
+                    fill="#FFFFFF"
+                  />
 
-                  {/* 2. Mảng Xanh Lam Đậm (Khác): 65° đến 125° */}
-                  <Path d={describeDonutArc(cx, cy, innerR, outerR, 65, 125)} fill="#4379F2" />
-
-                  {/* 3. Mảng Xanh Biển Nhạt: 125° đến 210° */}
-                  <Path d={describeDonutArc(cx, cy, innerR, outerR, 125, 210)} fill="#67E8F9" />
-
-                  {/* 4. Mảng Xanh Biển Trung: 210° đến 280° */}
-                  <Path d={describeDonutArc(cx, cy, innerR, outerR, 210, 280)} fill="#38BDF8" />
-
-                  {/* 5. Mảng Xanh Biển Đậm Vừa: 280° đến 360° */}
-                  <Path d={describeDonutArc(cx, cy, innerR, outerR, 280, 360)} fill="#22D3EE" />
+                  {/* 2. Mảng Xanh Biển (Khác): angles.a1 đến 360° */}
+                  <Path
+                    d={describeDonutArc(cx, cy, innerR, outerR, Math.max(10, Math.min(350, angles.a1)), 360)}
+                    fill="#0284C7"
+                  />
 
                   {/* Vạch chỉ hướng (Leader lines) */}
                   <Line x1={200} y1={95} x2={230} y2={95} stroke="#0F172A" strokeWidth={1.5} />
-                  <Line x1={235} y1={155} x2={250} y2={155} stroke="#0F172A" strokeWidth={1.5} />
-                  <Line x1={202} y1={235} x2={246} y2={235} stroke="#0F172A" strokeWidth={1.5} />
-                  <Line x1={24} y1={218} x2={70} y2={218} stroke="#0F172A" strokeWidth={1.5} />
                   <Line x1={62} y1={100} x2={98} y2={100} stroke="#0F172A" strokeWidth={1.5} />
                 </Svg>
 

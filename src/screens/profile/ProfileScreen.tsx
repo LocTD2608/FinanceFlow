@@ -624,12 +624,18 @@ const styles = StyleSheet.create({
   },
   logoutBtn: {
     alignItems: 'center',
-    paddingVertical: 12,
+    justifyContent: 'center',
+    paddingVertical: 14,
+    backgroundColor: '#FEE2E2',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    marginTop: 8,
   },
   logoutBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#EF4444',
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#DC2626',
   },
   bottomNavContainer: {
     position: 'absolute',

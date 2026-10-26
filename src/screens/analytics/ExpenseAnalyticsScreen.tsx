@@ -268,11 +268,68 @@ export default function ExpenseAnalyticsScreen({
           </Text>
         </View>
 
+        {/* 3-way Segmented Control chuẩn UX */}
+        <View style={styles.segmentedControl}>
+          <TouchableOpacity
+            style={[
+              styles.segmentItem,
+              viewMode === 'list' && styles.segmentItemActive,
+            ]}
+            onPress={() => setViewMode('list')}
+            activeOpacity={0.8}
+          >
+            <Text
+              style={[
+                styles.segmentText,
+                viewMode === 'list' && styles.segmentTextActive,
+              ]}
+            >
+              Danh sách
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.segmentItem,
+              viewMode === 'rank_expense' && styles.segmentItemActive,
+            ]}
+            onPress={() => setViewMode('rank_expense')}
+            activeOpacity={0.8}
+          >
+            <Text
+              style={[
+                styles.segmentText,
+                viewMode === 'rank_expense' && styles.segmentTextActive,
+              ]}
+            >
+              Khoản chi
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.segmentItem,
+              viewMode === 'rank_category' && styles.segmentItemActive,
+            ]}
+            onPress={() => setViewMode('rank_category')}
+            activeOpacity={0.8}
+          >
+            <Text
+              style={[
+                styles.segmentText,
+                viewMode === 'rank_category' && styles.segmentTextActive,
+              ]}
+            >
+              Danh mục
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         {/* Period Overview Card (Dùng chung cho cả 3 chế độ) */}
         <View style={styles.periodCard}>
           <TouchableOpacity style={styles.datePickerBtn} activeOpacity={0.7}>
             <Calendar size={14} color="#0284C7" />
-            <Text style={styles.datePickerText}>16/10 – 18/10/2026</Text>
+            <Text style={styles.datePickerText}>Tháng hiện tại</Text>
             <ChevronDown size={14} color="#64748B" />
           </TouchableOpacity>
 
@@ -337,6 +394,19 @@ export default function ExpenseAnalyticsScreen({
               </TouchableOpacity>
             </View>
 
+            {/* Empty State khi không có kết quả */}
+            {filteredExpenses.length === 0 && (
+              <View style={styles.emptyContainer}>
+                <View style={styles.emptyIconCircle}>
+                  <Search size={24} color="#0284C7" />
+                </View>
+                <Text style={styles.emptyTitle}>Không tìm thấy khoản chi nào</Text>
+                <Text style={styles.emptySubtitle}>
+                  {searchQuery ? `Không có giao dịch khớp với "${searchQuery}"` : 'Chưa có khoản chi nào trong kỳ này.'}
+                </Text>
+              </View>
+            )}
+
             {/* Date Groups */}
             {groupedDates.map((group) => {
               if (group.items.length === 0) return null;
@@ -346,7 +416,7 @@ export default function ExpenseAnalyticsScreen({
                   <View style={styles.groupHeaderRow}>
                     <Text style={styles.groupDateText}>{group.date}</Text>
                     <Text style={styles.groupSubtotalText}>
-                      {formatCurrency(group.subtotal)}
+                      -{formatCurrency(group.subtotal)}
                     </Text>
                   </View>
 
@@ -373,7 +443,7 @@ export default function ExpenseAnalyticsScreen({
 
                           <View style={styles.expenseRight}>
                             <Text style={styles.expenseAmountText}>
-                              {formatCurrency(item.amount)}
+                              -{formatCurrency(item.amount)}
                             </Text>
                             {isQR && (
                               <Text style={styles.expenseTagText}>
@@ -657,6 +727,73 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '900',
     color: '#0F172A',
+  },
+  segmentedControl: {
+    flexDirection: 'row',
+    backgroundColor: '#E0F2FE',
+    borderRadius: 16,
+    padding: 4,
+    marginBottom: 14,
+  },
+  segmentItem: {
+    flex: 1,
+    paddingVertical: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+  },
+  segmentItemActive: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#0284C7',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  segmentText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0369A1',
+  },
+  segmentTextActive: {
+    color: '#0F172A',
+    fontWeight: '800',
+  },
+  emptyContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 1,
+  },
+  emptyIconCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#F0F9FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  emptyTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#0F172A',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  emptySubtitle: {
+    fontSize: 12,
+    color: '#64748B',
+    textAlign: 'center',
+    lineHeight: 18,
+    paddingHorizontal: 16,
   },
   periodCard: {
     backgroundColor: '#FFFFFF',
