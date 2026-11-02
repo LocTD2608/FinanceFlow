@@ -30,6 +30,7 @@ import {
 } from 'lucide-react-native';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useTransactionStore } from '../../store/useTransactionStore';
+import { dashboardApi, CategoryBreakdownItem } from '../../api/dashboard';
 
 const { width } = Dimensions.get('window');
 
@@ -130,14 +131,20 @@ export default function ExpenseAnalyticsScreen({
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('Tất cả');
   const [paymentFilter, setPaymentFilter] = useState('Tất cả');
+  const [breakdownItems, setBreakdownItems] = useState<CategoryBreakdownItem[]>([]);
 
   useEffect(() => {
     fetchTransactions(token || undefined);
+    dashboardApi.getBreakdown(token || undefined, { type: 'expense', period: 'month' }).then((res) => {
+      if (res?.success && res.data) {
+        setBreakdownItems(res.data.items || []);
+      }
+    });
   }, [token, fetchTransactions]);
 
   const activeExpenses: ExpenseItem[] = useMemo(() => {
     const expenseList = transactions.filter((t) => t.type === 'expense');
-    if (expenseList.length === 0) return SAMPLE_EXPENSES;
+    if (expenseList.length === 0) return [];
 
     return expenseList.map((t) => {
       const catObj = typeof t.categoryId === 'object' && t.categoryId ? (t.categoryId as any) : null;
@@ -212,10 +219,39 @@ export default function ExpenseAnalyticsScreen({
     return [...activeExpenses].sort((a, b) => b.amount - a.amount);
   }, [activeExpenses]);
 
-  // Xếp hạng danh mục từ cao đến thấp
+  // Xếp hạng danh mục từ cao đến thấp kết nối API dashboard breakdown
   const rankedCategories = useMemo(() => {
-    const catMap = new Map<string, { id: string; name: string; icon: any; txCount: number; amount: number; color: string }>();
     const colors = ['#0284C7', '#38BDF8', '#7DD3FC', '#BAE6FD', '#E2E8F0', '#94A3B8'];
+
+    if (breakdownItems.length > 0) {
+      return breakdownItems.map((item, idx) => {
+        let icon = MoreHorizontal;
+        const lower = (item.name || '').toLowerCase();
+        if (lower.includes('ăn') || lower.includes('uống') || lower.includes('cơm') || lower.includes('food')) {
+          icon = Utensils;
+        } else if (lower.includes('mua') || lower.includes('sắm') || lower.includes('shop')) {
+          icon = ShoppingBag;
+        } else if (lower.includes('xe') || lower.includes('di chuyển') || lower.includes('xăng')) {
+          icon = Car;
+        } else if (lower.includes('phim') || lower.includes('giải trí')) {
+          icon = Film;
+        }
+
+        return {
+          id: item.categoryId || String(idx + 1),
+          rank: item.rank || idx + 1,
+          name: item.name,
+          icon,
+          txCount: item.transactionCount,
+          amount: item.amount,
+          percent: item.percent,
+          color: item.color && item.color !== '#6B7280' ? item.color : colors[idx % colors.length],
+        };
+      });
+    }
+
+    // Fallback nếu chưa có breakdown API thì tính từ activeExpenses
+    const catMap = new Map<string, { id: string; rank: number; name: string; icon: any; txCount: number; amount: number; color: string }>();
 
     activeExpenses.forEach((item) => {
       const existing = catMap.get(item.categoryName);
@@ -225,6 +261,7 @@ export default function ExpenseAnalyticsScreen({
       } else {
         catMap.set(item.categoryName, {
           id: item.category,
+          rank: 1,
           name: item.categoryName,
           icon: item.icon,
           txCount: 1,
@@ -239,10 +276,11 @@ export default function ExpenseAnalyticsScreen({
 
     return list.map((c, idx) => ({
       ...c,
+      rank: idx + 1,
       color: colors[idx % colors.length],
       percent: totalAmount > 0 ? Math.round((c.amount / totalAmount) * 1000) / 10 : 0,
     }));
-  }, [activeExpenses, totalAmount]);
+  }, [breakdownItems, activeExpenses, totalAmount]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -523,8 +561,13 @@ export default function ExpenseAnalyticsScreen({
                 </View>
 
                 <View style={styles.rankListContainer}>
-                  {rankedExpenses.map((item, idx) => {
-                    const rankNum = String(idx + 1).padStart(2, '0');
+                  {rankedExpenses.length === 0 ? (
+                    <Text style={{ textAlign: 'center', color: '#94A3B8', paddingVertical: 20 }}>
+                      Chưa có khoản chi tiêu nào để xếp hạng.
+                    </Text>
+                  ) : (
+                    rankedExpenses.map((item, idx) => {
+                      const rankNum = String(idx + 1).padStart(2, '0');
                     return (
                       <View key={item.id} style={styles.rankCard}>
                         <View style={styles.rankNumberBadge}>
@@ -552,7 +595,8 @@ export default function ExpenseAnalyticsScreen({
                         </View>
                       </View>
                     );
-                  })}
+                  })
+                  )}
                 </View>
               </View>
             )}
@@ -582,7 +626,9 @@ export default function ExpenseAnalyticsScreen({
                   </View>
 
                   <Text style={styles.proportionFootnote}>
-                    Mua sắm chiếm nhiều nhất: 40% tổng chi trong kỳ.
+                    {rankedCategories.length > 0
+                      ? `${rankedCategories[0].name} chiếm nhiều nhất: ${rankedCategories[0].percent}% tổng chi trong kỳ.`
+                      : 'Chưa có dữ liệu chi tiêu trong kỳ.'}
                   </Text>
                 </View>
 
@@ -593,34 +639,40 @@ export default function ExpenseAnalyticsScreen({
                 </View>
 
                 <View style={styles.categoryRankContainer}>
-                  {rankedCategories.map((cat) => {
-                    const IconComp = cat.icon;
-                    return (
-                      <View key={cat.id} style={styles.catRankCard}>
-                        <View style={styles.catRankLeft}>
-                          <Text style={styles.catRankIndex}>{cat.id}</Text>
-                          <View style={styles.catRankIcon}>
-                            <IconComp size={16} color="#0F172A" />
+                  {rankedCategories.length === 0 ? (
+                    <Text style={{ textAlign: 'center', color: '#94A3B8', paddingVertical: 20 }}>
+                      Chưa có dữ liệu danh mục trong kỳ.
+                    </Text>
+                  ) : (
+                    rankedCategories.map((cat) => {
+                      const IconComp = cat.icon;
+                      return (
+                        <View key={cat.id} style={styles.catRankCard}>
+                          <View style={styles.catRankLeft}>
+                            <Text style={styles.catRankIndex}>{String(cat.rank || 1).padStart(2, '0')}</Text>
+                            <View style={styles.catRankIcon}>
+                              <IconComp size={16} color="#0F172A" />
+                            </View>
+                            <View>
+                              <Text style={styles.catRankName}>{cat.name}</Text>
+                              <Text style={styles.catRankTxCount}>
+                                {cat.txCount} giao dịch
+                              </Text>
+                            </View>
                           </View>
-                          <View>
-                            <Text style={styles.catRankName}>{cat.name}</Text>
-                            <Text style={styles.catRankTxCount}>
-                              {cat.txCount} giao dịch
+
+                          <View style={styles.catRankRight}>
+                            <Text style={styles.catRankAmount}>
+                              {formatCurrency(cat.amount)}
+                            </Text>
+                            <Text style={styles.catRankPercent}>
+                              {cat.percent}%
                             </Text>
                           </View>
                         </View>
-
-                        <View style={styles.catRankRight}>
-                          <Text style={styles.catRankAmount}>
-                            {formatCurrency(cat.amount)}
-                          </Text>
-                          <Text style={styles.catRankPercent}>
-                            {cat.percent}%
-                          </Text>
-                        </View>
-                      </View>
-                    );
-                  })}
+                      );
+                    })
+                  )}
                 </View>
               </View>
             )}

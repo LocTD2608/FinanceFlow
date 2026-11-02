@@ -13,12 +13,12 @@ const toObjectId = (id) => new mongoose.Types.ObjectId(String(id));
 const resolveRange = (query) => {
   const range = getPeriodRange(query.period || 'month', query.date);
   if (!range) {
-    return { error: 'period phải là week|month|year và date phải có dạng YYYY-MM-DD hợp lệ.' };
+    return { error: 'period phải là day|week|month|year và date phải có dạng YYYY-MM-DD hợp lệ.' };
   }
   return { range };
 };
 
-// Tổng thu/chi trong khoảng [from, to). Loại giao dịch transfer.
+// Tổng thu/chi trong khoảng [from, to). Loại giao dịch transfer, p2p.
 const sumByType = async (userId, from, to) => {
   const rows = await Transaction.aggregate([
     {
@@ -56,7 +56,7 @@ const totalBalance = async (userId) => {
   return rows.length ? rows[0].total : 0;
 };
 
-// GET /api/dashboard/summary?period=week|month|year&date=YYYY-MM-DD
+// GET /api/dashboard/summary?period=day|week|month|year&date=YYYY-MM-DD
 exports.summary = async (req, res) => {
   try {
     const { range, error } = resolveRange(req.query);
@@ -97,6 +97,91 @@ exports.summary = async (req, res) => {
   }
 };
 
+// GET /api/dashboard/overview?period=day|month&date=YYYY-MM-DD
+exports.overview = async (req, res) => {
+  try {
+    const { range, error } = resolveRange(req.query);
+    if (error) return res.status(400).json({ success: false, message: error });
+
+    const userId = req.user.id;
+    const [current, previous, balance, topCategoriesRaw, recentTransactions, transactionCount] =
+      await Promise.all([
+        sumByType(userId, range.from, range.to),
+        sumByType(userId, range.previous.from, range.previous.to),
+        totalBalance(userId),
+        Transaction.aggregate([
+          {
+            $match: {
+              userId: toObjectId(userId),
+              type: 'expense',
+              transactionDate: { $gte: range.from, $lt: range.to },
+            },
+          },
+          { $group: { _id: '$categoryId', amount: { $sum: '$amount' }, count: { $sum: 1 } } },
+          {
+            $lookup: {
+              from: 'categories',
+              localField: '_id',
+              foreignField: '_id',
+              as: 'category',
+            },
+          },
+          { $unwind: { path: '$category', preserveNullAndEmptyArrays: true } },
+          { $sort: { amount: -1 } },
+          { $limit: 5 },
+        ]),
+        Transaction.find({
+          userId,
+          transactionDate: { $gte: range.from, $lt: range.to },
+        })
+          .sort({ transactionDate: -1, createdAt: -1 })
+          .limit(5)
+          .populate('categoryId', 'name icon color type')
+          .populate('walletId', 'name type currency')
+          .lean(),
+        Transaction.countDocuments({
+          userId,
+          transactionDate: { $gte: range.from, $lt: range.to },
+        }),
+      ]);
+
+    const topCategories = topCategoriesRaw.map((r, index) => ({
+      rank: index + 1,
+      categoryId: r._id,
+      name: r.category ? r.category.name : 'Không xác định',
+      icon: r.category ? r.category.icon : 'circle',
+      color: r.category ? r.category.color : '#6B7280',
+      amount: r.amount,
+      percent: current.expense > 0 ? round2((r.amount / current.expense) * 100) : 0,
+      transactionCount: r.count,
+    }));
+
+    return res.json({
+      success: true,
+      data: {
+        period: range.period,
+        from: range.fromStr,
+        to: range.toStr,
+        totalIncome: current.income,
+        totalExpense: current.expense,
+        netCashFlow: current.income - current.expense,
+        balance,
+        comparison: {
+          prevIncome: previous.income,
+          prevExpense: previous.expense,
+          incomeChangePercent: changePercent(current.income, previous.income),
+          expenseChangePercent: changePercent(current.expense, previous.expense),
+        },
+        topCategories,
+        recentTransactions,
+        transactionCount,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Lỗi server: ' + err.message });
+  }
+};
+
 // GET /api/dashboard/breakdown?type=expense|income&period=...&date=...
 exports.breakdown = async (req, res) => {
   try {
@@ -115,7 +200,13 @@ exports.breakdown = async (req, res) => {
           transactionDate: { $gte: range.from, $lt: range.to },
         },
       },
-      { $group: { _id: '$categoryId', amount: { $sum: '$amount' } } },
+      {
+        $group: {
+          _id: '$categoryId',
+          amount: { $sum: '$amount' },
+          transactionCount: { $sum: 1 },
+        },
+      },
       {
         $lookup: {
           from: 'categories',
@@ -129,13 +220,15 @@ exports.breakdown = async (req, res) => {
     ]);
 
     const total = rows.reduce((sum, r) => sum + r.amount, 0);
-    const items = rows.map((r) => ({
+    const items = rows.map((r, index) => ({
+      rank: index + 1,
       categoryId: r._id,
       name: r.category ? r.category.name : 'Không xác định',
       icon: r.category ? r.category.icon : 'circle',
       color: r.category ? r.category.color : '#6B7280',
       amount: r.amount,
       percent: total > 0 ? round2((r.amount / total) * 100) : 0,
+      transactionCount: r.transactionCount,
     }));
 
     return res.json({

@@ -60,5 +60,6 @@ const walletSchema = new mongoose.Schema(
 
 // Indexes
 walletSchema.index({ userId: 1, isArchived: 1 });
+walletSchema.index({ accountNumber: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.model('Wallet', walletSchema);

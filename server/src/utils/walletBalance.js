@@ -17,8 +17,8 @@ const deltasFor = ({ type, amount, walletId, destinationWalletId }, revert = fal
   const n = Number(amount);
   if (!n || n <= 0) return [];
   const sign = revert ? -1 : 1;
-  if (type === 'expense') return [{ walletId, delta: -n * sign }];
-  if (type === 'income') return [{ walletId, delta: n * sign }];
+  if (type === 'expense' || type === 'p2p_out') return [{ walletId, delta: -n * sign }];
+  if (type === 'income' || type === 'p2p_in') return [{ walletId, delta: n * sign }];
   if (type === 'transfer') {
     const list = [{ walletId, delta: -n * sign }];
     if (destinationWalletId) list.push({ walletId: destinationWalletId, delta: n * sign });
