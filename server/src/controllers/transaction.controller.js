@@ -1,3 +1,4 @@
+const realtimeService = require('../services/realtime.service');
 const mongoose = require('mongoose');
 const Transaction = require('../models/Transaction');
 const Wallet = require('../models/Wallet');
@@ -127,6 +128,21 @@ exports.create = async (req, res) => {
     } catch (err) {
       await rollbackDeltas(deltas);
       throw err;
+    }
+
+    try {
+      const updatedWallet = await Wallet.findById(sourceWallet._id);
+      realtimeService.emitBalanceChange(userId, {
+        type,
+        direction: type === 'income' ? 'in' : 'out',
+        amount: numericAmount,
+        walletId: sourceWallet._id,
+        walletName: sourceWallet.name,
+        newBalance: updatedWallet ? updatedWallet.balance : undefined,
+        note: transaction.note || '',
+      });
+    } catch (e) {
+      // ignore
     }
 
     return res.status(201).json({

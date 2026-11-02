@@ -1,3 +1,4 @@
+const realtimeService = require('../services/realtime.service');
 const mongoose = require('mongoose');
 const Wallet = require('../models/Wallet');
 const Transaction = require('../models/Transaction');
@@ -431,6 +432,16 @@ exports.topup = async (req, res) => {
       if (err && err.code === 11000 && idempotencyKey && (await replay())) return;
       throw err;
     }
+
+    realtimeService.emitBalanceChange(userId, {
+      type: 'income',
+      direction: 'in',
+      amount,
+      walletId: updatedWallet._id,
+      walletName: updatedWallet.name,
+      newBalance: updatedWallet.balance,
+      note: note || `Nạp tiền vào ví ${updatedWallet.name}`,
+    });
 
     return res.status(201).json({
       success: true,

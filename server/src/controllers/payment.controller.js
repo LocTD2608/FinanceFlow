@@ -1,3 +1,4 @@
+const realtimeService = require('../services/realtime.service');
 const crypto = require('crypto');
 const mongoose = require('mongoose');
 const PaymentIntent = require('../models/PaymentIntent');
@@ -249,6 +250,22 @@ const confirmIntent = async (req, res) => {
     }
 
     await PaymentIntent.updateOne({ _id: locked._id }, { status: 'completed', transactionId: tx._id });
+
+    try {
+      const updatedWallet = await Wallet.findById(locked.walletId);
+      realtimeService.emitBalanceChange(locked.userId, {
+        type: 'expense',
+        direction: 'out',
+        amount: locked.amount,
+        walletId: locked.walletId,
+        walletName: updatedWallet ? updatedWallet.name : 'Ví thanh toán',
+        newBalance: updatedWallet ? updatedWallet.balance : undefined,
+        note: locked.note || 'Thanh toán QR',
+      });
+    } catch (e) {
+      // ignore
+    }
+
     return res.status(201).json({ success: true, data: tx });
   } catch (error) {
     return res.status(error.status || 500).json({ success: false, message: error.message });
