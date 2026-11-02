@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, ActivityIndicator, StyleSheet, LogBox } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, LogBox, Alert } from 'react-native';
 
 // Bỏ qua cảnh báo thông báo đẩy của Expo Go trên Android để không hiện thanh vàng
 LogBox.ignoreLogs(['[expo-notifications]']);
@@ -11,6 +11,7 @@ import LoginScreen from './src/screens/auth/LoginScreen';
 import RegisterScreen from './src/screens/auth/RegisterScreen';
 import SuccessScreen from './src/screens/auth/SuccessScreen';
 import FinancialCenterScreen from './src/screens/dashboard/FinancialCenterScreen';
+import AdminPortalScreen from './src/screens/admin/AdminPortalScreen';
 import { registerForPushNotifications } from './src/utils/pushNotifications';
 
 type ScreenType = 'welcome' | 'login' | 'register' | 'success' | 'home';
@@ -18,7 +19,7 @@ type ScreenType = 'welcome' | 'login' | 'register' | 'success' | 'home';
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<ScreenType>('welcome');
   const [successUsername, setSuccessUsername] = useState<string>('');
-  const { isLoading, loadSession, token } = useAuthStore();
+  const { isLoading, loadSession, token, user, activeMode, logout } = useAuthStore();
 
   useEffect(() => {
     loadSession();
@@ -28,6 +29,25 @@ export default function App() {
   useEffect(() => {
     if (currentScreen === 'home' && token) registerForPushNotifications(token);
   }, [currentScreen, token]);
+
+  // Kiểm tra an toàn: nếu tài khoản bị khóa trong phiên, tự động logout
+  useEffect(() => {
+    if (token && user?.status === 'locked') {
+      Alert.alert(
+        'Tài khoản bị khóa',
+        'Tài khoản của bạn đã bị khóa bởi Quản trị viên. Vui lòng liên hệ bộ phận hỗ trợ.',
+        [
+          {
+            text: 'Đăng xuất',
+            onPress: async () => {
+              await logout();
+              setCurrentScreen('welcome');
+            },
+          },
+        ]
+      );
+    }
+  }, [token, user?.status, logout]);
 
   if (isLoading) {
     return (
@@ -81,9 +101,13 @@ export default function App() {
         />
       )}
 
-      {/* 5. Màn hình Trung tâm tài chính chính */}
+      {/* 5. Điều hướng theo Vai trò (Role Guard): Admin Portal vs Financial Center */}
       {currentScreen === 'home' && (
-        <FinancialCenterScreen onLogout={() => setCurrentScreen('welcome')} />
+        user?.role === 'admin' && activeMode === 'admin' ? (
+          <AdminPortalScreen onLogout={() => setCurrentScreen('welcome')} />
+        ) : (
+          <FinancialCenterScreen onLogout={() => setCurrentScreen('welcome')} />
+        )
       )}
     </SafeAreaProvider>
   );

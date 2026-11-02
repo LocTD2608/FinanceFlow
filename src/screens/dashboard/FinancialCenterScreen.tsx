@@ -9,10 +9,11 @@ import {
   Dimensions,
   RefreshControl,
   Platform,
-  StatusBar,
+  StatusBar as RNStatusBar,
   Animated,
   Easing,
 } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path, Line } from 'react-native-svg';
 import {
@@ -50,7 +51,7 @@ interface Props {
 }
 
 export default function FinancialCenterScreen({ onLogout }: Props) {
-  const { token } = useAuthStore();
+  const { token, user, setActiveMode } = useAuthStore();
   const { summary, transactions, fetchSummary, fetchTransactions } = useTransactionStore();
 
   const currentYear = new Date().getFullYear();
@@ -348,7 +349,7 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
       default:
         return (
           <SafeAreaView style={styles.safeArea}>
-            <StatusBar barStyle="dark-content" backgroundColor="#BAE6FD" />
+            <StatusBar style="dark" />
             <ScrollView
               contentContainerStyle={styles.scrollContainer}
               showsVerticalScrollIndicator={false}
@@ -361,6 +362,22 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
                 />
               }
             >
+              {/* Dual-Mode Admin Switcher Banner */}
+              {user?.role === 'admin' && (
+                <View style={styles.adminBanner}>
+                  <View style={styles.adminBannerLeft}>
+                    <Text style={styles.adminBannerTitle}>🛡️ Chế độ Người dùng (Admin)</Text>
+                    <Text style={styles.adminBannerSub}>Bạn đang xem giao diện người dùng cá nhân</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.adminBackBtn}
+                    onPress={() => setActiveMode('admin')}
+                  >
+                    <Text style={styles.adminBackBtnText}>⚙️ Về Admin</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
               {/* Header với Tiêu đề & Mascot Gấu Trúc/Gấu Bông */}
               <View style={styles.headerWrapper}>
                 <Text style={styles.screenTitle}>Trung tâm tài chính</Text>
@@ -564,6 +581,27 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
 }
 
 const styles = StyleSheet.create({
+  adminBanner: {
+    backgroundColor: '#F3E8FF',
+    borderWidth: 1,
+    borderColor: '#D8B4FE',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  adminBannerLeft: { flex: 1, marginRight: 8 },
+  adminBannerTitle: { fontSize: 13, fontWeight: '700', color: '#6B21A8' },
+  adminBannerSub: { fontSize: 11, color: '#7E22CE', marginTop: 2 },
+  adminBackBtn: {
+    backgroundColor: '#7C3AED',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  adminBackBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
   mainContainer: {
     flex: 1,
     backgroundColor: '#BAE6FD',
@@ -587,7 +625,7 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: '#BAE6FD',
-    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 28) + 4 : 0,
+    paddingTop: Platform.OS === 'android' ? (RNStatusBar.currentHeight || 28) + 4 : 0,
   },
   scrollContainer: {
     paddingHorizontal: 16,
