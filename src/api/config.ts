@@ -8,6 +8,7 @@ export const getApiBaseUrl = (): string => {
   // 1. Thử lấy IP máy chủ phát triển từ Expo Metro Bundler (chạy được trên mọi điện thoại cùng Wi-Fi)
   const hostUri =
     Constants.expoConfig?.hostUri ||
+    (Constants as any).expoGoConfig?.debuggerHost ||
     (Constants as any).manifest2?.extra?.expoGo?.debuggerHost ||
     (Constants as any).manifest?.debuggerHost;
 
@@ -25,7 +26,7 @@ export const getApiBaseUrl = (): string => {
 
   // 3. iPhone / Thiết bị thật chạy Wi-Fi cục bộ
   if (Platform.OS === 'ios') {
-    return 'http://192.168.103.64:5000/api';
+    return 'http://192.168.1.200:5000/api';
   }
 
   // 4. Web browser trên máy tính

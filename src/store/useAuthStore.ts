@@ -1,3 +1,4 @@
+import { useTransactionStore } from './useTransactionStore';
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { User, authApi } from '../api/auth';
@@ -57,6 +58,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   logout: async () => {
     await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
+    try { useTransactionStore.getState().reset(); } catch {}
     set({ user: null, token: null, activeMode: 'user' });
   },
 

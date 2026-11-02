@@ -445,8 +445,8 @@ exports.summary = async (req, res) => {
     let totalExpense = 0;
 
     stats.forEach((item) => {
-      if (item._id === 'income') totalIncome = item.totalAmount;
-      if (item._id === 'expense') totalExpense = item.totalAmount;
+      if (['income', 'transfer_in', 'p2p_in'].includes(item._id)) totalIncome += item.totalAmount;
+      if (['expense', 'transfer_out', 'p2p_out'].includes(item._id)) totalExpense += item.totalAmount;
     });
 
     return res.json({

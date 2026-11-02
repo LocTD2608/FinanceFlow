@@ -26,6 +26,7 @@ interface TransactionState {
   fetchSummary: (token?: string, month?: string) => Promise<void>;
   createTransaction: (token: string | undefined, input: CreateTransactionInput) => Promise<TransactionResult>;
   deleteTransaction: (token: string | undefined, id: string) => Promise<{ success: boolean; message: string }>;
+  reset: () => void;
 }
 
 const getCurrentMonthString = () => {
@@ -93,6 +94,15 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
     } finally {
       set({ isLoading: false });
     }
+  },
+
+  reset: () => {
+    set({
+      transactions: [],
+      summary: { totalIncome: 0, totalExpense: 0, netCashFlow: 0 },
+      isLoading: false,
+      selectedMonth: getCurrentMonthString(),
+    });
   },
 
   deleteTransaction: async (token: string | undefined, id: string) => {

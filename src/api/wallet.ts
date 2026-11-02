@@ -49,15 +49,41 @@ const LOCAL_TX_KEY = '@financeflow_local_transactions';
 
 const idOf = (w: { _id?: string; id?: string }) => (w._id || w.id) as string;
 
-const loadLocalWallets = async (): Promise<WalletItem[]> => {
-  const raw = await AsyncStorage.getItem(LOCAL_WALLETS_KEY);
+/**
+ * Decode userId tu JWT token (khong verify signature).
+ * Chi dung de phan biet offline storage theo tung user, tranh hien thi so du cheo.
+ */
+const getUserIdFromToken = (token?: string): string => {
+  if (!token) return 'local_user';
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return 'local_user';
+    let payloadStr: string;
+    if (typeof atob === 'function') {
+      payloadStr = atob(parts[1]);
+    } else {
+      payloadStr = Buffer.from(parts[1], 'base64').toString('utf8');
+    }
+    const payload = JSON.parse(payloadStr);
+    return payload.id || payload.sub || payload.userId || 'local_user';
+  } catch {
+    return 'local_user';
+  }
+};
+
+const localWalletsKey = (token?: string) =>
+  `${LOCAL_WALLETS_KEY}_${getUserIdFromToken(token)}`;
+
+const loadLocalWallets = async (token?: string): Promise<WalletItem[]> => {
+  const key = localWalletsKey(token);
+  const raw = await AsyncStorage.getItem(key);
   return raw
     ? JSON.parse(raw)
     : [
         {
           _id: 'w_cash_default',
           id: 'w_cash_default',
-          userId: 'local_user',
+          userId: getUserIdFromToken(token),
           name: 'Ví tiền mặt',
           type: 'cash',
           balance: 2500000,
@@ -66,7 +92,8 @@ const loadLocalWallets = async (): Promise<WalletItem[]> => {
       ];
 };
 
-const saveLocalWallets = (wallets: WalletItem[]) => AsyncStorage.setItem(LOCAL_WALLETS_KEY, JSON.stringify(wallets));
+const saveLocalWallets = (wallets: WalletItem[], token?: string) =>
+  AsyncStorage.setItem(localWalletsKey(token), JSON.stringify(wallets));
 
 const insufficient = (balance: number, required: number): ApiResult => ({
   success: false,
@@ -113,7 +140,7 @@ export const walletApi = {
       clearTimeout(timeoutId);
       return await res.json();
     } catch {
-      const wallets = await loadLocalWallets();
+      const wallets = await loadLocalWallets(token);
       return { success: true, data: wallets };
     }
   },
@@ -153,7 +180,7 @@ export const walletApi = {
       if (!Number.isFinite(balance) || (balance < 0 && input.type !== 'credit_card')) {
         return { success: false, message: 'Số dư ban đầu không được âm.' };
       }
-      const wallets = await loadLocalWallets();
+      const wallets = await loadLocalWallets(token);
       const id = `w_${Date.now()}`;
       const wallet: WalletItem = {
         _id: id,
@@ -168,7 +195,7 @@ export const walletApi = {
         isExcludedFromNetWorth: !!input.isExcludedFromNetWorth,
       };
       wallets.push(wallet);
-      await saveLocalWallets(wallets);
+      await saveLocalWallets(wallets, token);
       return { success: true, data: wallet, offline: true };
     }
   },
@@ -181,7 +208,7 @@ export const walletApi = {
       const res = await request(`/${walletId}`, 'PATCH', token, input);
       return await res.json();
     } catch {
-      const wallets = await loadLocalWallets();
+      const wallets = await loadLocalWallets(token);
       const wallet = wallets.find((w) => idOf(w) === walletId);
       if (!wallet) return { success: false, message: 'Không tìm thấy ví.' };
       if (input.balance !== undefined) {
@@ -193,7 +220,7 @@ export const walletApi = {
       }
       if (input.name !== undefined) wallet.name = input.name.trim();
       if (input.isExcludedFromNetWorth !== undefined) wallet.isExcludedFromNetWorth = input.isExcludedFromNetWorth;
-      await saveLocalWallets(wallets);
+      await saveLocalWallets(wallets, token);
       return { success: true, data: wallet, offline: true };
     }
   },
@@ -204,13 +231,13 @@ export const walletApi = {
       const res = await request(`/${walletId}`, 'DELETE', token);
       return await res.json();
     } catch {
-      const wallets = await loadLocalWallets();
+      const wallets = await loadLocalWallets(token);
       if (wallets.filter((w) => !w.isArchived).length <= 1) {
         return { success: false, message: 'Không thể xóa ví cuối cùng.' };
       }
       const wallet = wallets.find((w) => idOf(w) === walletId);
       if (wallet) wallet.isArchived = true;
-      await saveLocalWallets(wallets);
+      await saveLocalWallets(wallets, token);
       return { success: true, offline: true };
     }
   },
@@ -244,11 +271,11 @@ export const walletApi = {
     } catch {
       const amount = Number(input.amount);
       if (!Number.isFinite(amount) || amount <= 0) return { success: false, message: 'Số tiền không hợp lệ.' };
-      const wallets = await loadLocalWallets();
+      const wallets = await loadLocalWallets(token);
       const wallet = wallets.find((w) => idOf(w) === walletId);
       if (!wallet) return { success: false, message: 'Không tìm thấy ví.' };
       wallet.balance += amount;
-      await saveLocalWallets(wallets);
+      await saveLocalWallets(wallets, token);
 
       dispatchBalanceNotification({
         type: 'income',

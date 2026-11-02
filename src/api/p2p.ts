@@ -46,6 +46,27 @@ const LOCAL_WALLETS_KEY = '@financeflow_local_wallets';
 const LOCAL_TX_KEY = '@financeflow_local_transactions';
 const LOCAL_P2P_KEY = '@financeflow_local_p2p_transfers';
 
+/**
+ * Decode userId tu JWT token de tao key offline rieng biet theo tung user.
+ */
+const getUserIdFromToken = (token?: string): string => {
+  if (!token) return 'local_user';
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return 'local_user';
+    let payloadStr: string;
+    if (typeof atob === 'function') {
+      payloadStr = atob(parts[1]);
+    } else {
+      payloadStr = Buffer.from(parts[1], 'base64').toString('utf8');
+    }
+    const payload = JSON.parse(payloadStr);
+    return payload.id || payload.sub || payload.userId || 'local_user';
+  } catch {
+    return 'local_user';
+  }
+};
+
 const MOCK_RECIPIENTS: P2PRecipient[] = [
   {
     id: 'rec_alice',
@@ -76,15 +97,16 @@ const MOCK_RECIPIENTS: P2PRecipient[] = [
   },
 ];
 
-const loadLocalWallets = async (): Promise<any[]> => {
-  const raw = await AsyncStorage.getItem(LOCAL_WALLETS_KEY);
+const loadLocalWallets = async (token?: string): Promise<any[]> => {
+  const key = `${LOCAL_WALLETS_KEY}_${getUserIdFromToken(token)}`;
+  const raw = await AsyncStorage.getItem(key);
   return raw
     ? JSON.parse(raw)
     : [
         {
           _id: 'w_cash_default',
           id: 'w_cash_default',
-          userId: 'local_user',
+          userId: getUserIdFromToken(token),
           name: 'Ví tiền mặt',
           type: 'cash',
           balance: 2500000,
@@ -93,8 +115,8 @@ const loadLocalWallets = async (): Promise<any[]> => {
       ];
 };
 
-const saveLocalWallets = (wallets: any[]) =>
-  AsyncStorage.setItem(LOCAL_WALLETS_KEY, JSON.stringify(wallets));
+const saveLocalWallets = (wallets: any[], token?: string) =>
+  AsyncStorage.setItem(`${LOCAL_WALLETS_KEY}_${getUserIdFromToken(token)}`, JSON.stringify(wallets));
 
 const request = async (
   path: string,
@@ -216,7 +238,7 @@ export const p2pApi = {
       }
 
       // Tải ví local
-      const wallets = await loadLocalWallets();
+      const wallets = await loadLocalWallets(token);
       const targetWalletId = data.walletId || data.fromWalletId;
       let wallet = targetWalletId
         ? wallets.find((w) => (w._id || w.id) === targetWalletId)
@@ -244,7 +266,7 @@ export const p2pApi = {
 
       // Trừ số dư ví
       wallet.balance -= numericAmount;
-      await saveLocalWallets(wallets);
+      await saveLocalWallets(wallets, token);
 
       // Tra cứu tên người nhận
       const mock = MOCK_RECIPIENTS.find(

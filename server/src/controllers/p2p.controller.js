@@ -330,7 +330,11 @@ exports.transfer = async (req, res) => {
       });
     }
 
-    await Wallet.findByIdAndUpdate(recipientWallet._id, { $inc: { balance: numericAmount } }, { new: true });
+    const updatedRecipientWallet = await Wallet.findByIdAndUpdate(
+      recipientWallet._id,
+      { $inc: { balance: numericAmount } },
+      { new: true }
+    );
 
     const groupId = new mongoose.Types.ObjectId().toString();
     const recipientName =

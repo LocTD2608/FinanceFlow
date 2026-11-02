@@ -28,6 +28,7 @@ import {
 } from 'lucide-react-native';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useTransactionStore } from '../../store/useTransactionStore';
+import { useNotificationStore } from '../../store/useNotificationStore';
 import { transactionApi, TransactionItem } from '../../api/transaction';
 import { walletApi, WalletItem } from '../../api/wallet';
 import { dashboardApi, CategoryBreakdownItem } from '../../api/dashboard';
@@ -75,6 +76,8 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
   useEffect(() => {
     loadWallets();
   }, [loadWallets, refreshKey]);
+
+
 
   const activeWallets = wallets.filter((w) => !w.isArchived);
   const defaultWallet = activeWallets[0] || null;
@@ -129,6 +132,15 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
     loadData(currentMonthIndex);
   }, [currentMonthIndex, loadData]);
 
+  const { currentNotification } = useNotificationStore();
+  useEffect(() => {
+    if (currentNotification) {
+      loadWallets();
+      loadData(currentMonthIndex);
+      setRefreshKey((k) => k + 1);
+    }
+  }, [currentNotification, loadWallets, loadData, currentMonthIndex]);
+
   const onRefresh = async () => {
     setRefreshing(true);
     await loadData(currentMonthIndex);
@@ -153,8 +165,8 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
     allTransactions.forEach((t) => {
       const tTime = t.transactionDate ? new Date(t.transactionDate).getTime() : 0;
       if (tTime > endOfMonthTime) {
-        if (t.type === 'income') futureIncome += t.amount;
-        if (t.type === 'expense') futureExpense += t.amount;
+        if (t.type === 'income' || (t.type as any) === 'transfer_in' || (t.type as any) === 'p2p_in') futureIncome += t.amount;
+        if (t.type === 'expense' || (t.type as any) === 'transfer_out' || (t.type as any) === 'p2p_out') futureExpense += t.amount;
       }
     });
 

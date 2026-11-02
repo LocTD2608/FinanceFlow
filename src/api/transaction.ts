@@ -58,6 +58,26 @@ const API_BASE_URL = `${ROOT_API_URL}/transactions`;
 const LOCAL_TX_KEY = '@financeflow_local_transactions';
 const LOCAL_WALLETS_KEY = '@financeflow_local_wallets';
 
+const getUserIdFromToken = (token?: string): string => {
+  if (!token) return 'local_user';
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return 'local_user';
+    let payloadStr: string;
+    if (typeof atob === 'function') {
+      payloadStr = atob(parts[1]);
+    } else {
+      payloadStr = Buffer.from(parts[1], 'base64').toString('utf8');
+    }
+    const payload = JSON.parse(payloadStr);
+    return payload.id || payload.sub || payload.userId || 'local_user';
+  } catch {
+    return 'local_user';
+  }
+};
+const localTxKey = (token?: string) => `${LOCAL_TX_KEY}_${getUserIdFromToken(token)}`;
+const localWalletsKey = (token?: string) => `${LOCAL_WALLETS_KEY}_${getUserIdFromToken(token)}`;
+
 export const transactionApi = {
   /**
    * Lấy danh sách giao dịch có phân trang và lọc theo tháng
@@ -84,7 +104,7 @@ export const transactionApi = {
       return await res.json();
     } catch {
       // Offline fallback: lấy từ AsyncStorage
-      const raw = await AsyncStorage.getItem(LOCAL_TX_KEY);
+      const raw = await AsyncStorage.getItem(localTxKey(token));
       const items: TransactionItem[] = raw ? JSON.parse(raw) : [];
       let filtered = [...items];
       if (query?.type) {
@@ -122,7 +142,7 @@ export const transactionApi = {
       return await res.json();
     } catch {
       // Offline fallback: Cập nhật số dư trong local wallets
-      const rawWallets = await AsyncStorage.getItem(LOCAL_WALLETS_KEY);
+      const rawWallets = await AsyncStorage.getItem(localWalletsKey(token));
       const wallets = rawWallets ? JSON.parse(rawWallets) : [
         { id: input.walletId, name: 'Ví mặc định', balance: 10000000, type: 'cash' },
       ];
@@ -179,7 +199,7 @@ export const transactionApi = {
           });
         }
       }
-      await AsyncStorage.setItem(LOCAL_WALLETS_KEY, JSON.stringify(wallets));
+      await AsyncStorage.setItem(localWalletsKey(token), JSON.stringify(wallets));
 
       const newTx: TransactionItem = {
         _id: `tx_${Date.now()}`,
@@ -194,10 +214,10 @@ export const transactionApi = {
         createdAt: new Date().toISOString(),
       };
 
-      const rawTx = await AsyncStorage.getItem(LOCAL_TX_KEY);
+      const rawTx = await AsyncStorage.getItem(localTxKey(token));
       const transactions: TransactionItem[] = rawTx ? JSON.parse(rawTx) : [];
       transactions.unshift(newTx);
-      await AsyncStorage.setItem(LOCAL_TX_KEY, JSON.stringify(transactions));
+      await AsyncStorage.setItem(localTxKey(token), JSON.stringify(transactions));
 
       return {
         success: true,
@@ -227,11 +247,11 @@ export const transactionApi = {
       return await res.json();
     } catch {
       // Offline fallback: Hoàn tác số dư
-      const rawTx = await AsyncStorage.getItem(LOCAL_TX_KEY);
+      const rawTx = await AsyncStorage.getItem(localTxKey(token));
       let transactions: TransactionItem[] = rawTx ? JSON.parse(rawTx) : [];
       const tx = transactions.find((t) => t._id === id);
       if (tx) {
-        const rawWallets = await AsyncStorage.getItem(LOCAL_WALLETS_KEY);
+        const rawWallets = await AsyncStorage.getItem(localWalletsKey(token));
         const wallets = rawWallets ? JSON.parse(rawWallets) : [];
         const sourceWallet = wallets.find((w: { id: string }) => w.id === (typeof tx.walletId === 'string' ? tx.walletId : tx.walletId?.id));
         if (sourceWallet) {
@@ -243,10 +263,10 @@ export const transactionApi = {
             const destWallet = wallets.find((w: { id: string }) => w.id === destId);
             if (destWallet) destWallet.balance -= tx.amount;
           }
-          await AsyncStorage.setItem(LOCAL_WALLETS_KEY, JSON.stringify(wallets));
+          await AsyncStorage.setItem(localWalletsKey(token), JSON.stringify(wallets));
         }
         transactions = transactions.filter((t) => t._id !== id);
-        await AsyncStorage.setItem(LOCAL_TX_KEY, JSON.stringify(transactions));
+        await AsyncStorage.setItem(localTxKey(token), JSON.stringify(transactions));
       }
       return { success: true, message: 'Đã xóa giao dịch và hoàn tác số dư (offline)!' };
     }
@@ -272,7 +292,7 @@ export const transactionApi = {
       return await res.json();
     } catch {
       // Offline fallback
-      const raw = await AsyncStorage.getItem(LOCAL_TX_KEY);
+      const raw = await AsyncStorage.getItem(localTxKey(token));
       const items: TransactionItem[] = raw ? JSON.parse(raw) : [];
       let totalIncome = 0;
       let totalExpense = 0;
