@@ -14,6 +14,7 @@ const paymentRoutes = require('./routes/payment.routes');
 const netWorthRoutes = require('./routes/netWorth.routes');
 const billReminderRoutes = require('./routes/billReminder.routes');
 const adminRoutes = require('./routes/admin.routes');
+const securityRoutes = require('./routes/security.routes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -54,6 +55,9 @@ app.use('/api/bill-reminders', billReminderRoutes);
 
 // 10. Quản trị hệ thống & Phân quyền (RBAC - Yêu cầu role: admin)
 app.use('/api/admin', adminRoutes);
+
+// 11. Quản lý bảo mật ví, mã PIN & xác thực sinh trắc học
+app.use('/api/security/pin', securityRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

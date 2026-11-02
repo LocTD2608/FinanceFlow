@@ -101,6 +101,35 @@ const userSchema = new mongoose.Schema(
       ],
       default: [],
     },
+    // Bảo mật giao dịch & Mã PIN
+    transactionPinHash: {
+      type: String,
+      default: null,
+    },
+    failedPinAttempts: {
+      type: Number,
+      default: 0,
+    },
+    pinLockedUntil: {
+      type: Date,
+      default: null,
+    },
+    biometricEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    qrCodePayload: {
+      type: String,
+      default: null,
+    },
+    pinResetOtpHash: {
+      type: String,
+      default: null,
+    },
+    pinResetOtpExpiresAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true, // Tự động thêm createdAt & updatedAt
