@@ -28,7 +28,7 @@ export default function DailyExpenseChart({ token, monthStr, refreshKey }: Props
   const [average, setAverage] = useState(0);
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
 
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<any>(null);
 
   useEffect(() => {
     let isMounted = true;
