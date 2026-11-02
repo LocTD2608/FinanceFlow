@@ -71,6 +71,24 @@ const userSchema = new mongoose.Schema(
       enum: ['dark', 'light'],
       default: 'dark',
     },
+    role: {
+      type: String,
+      enum: {
+        values: ['user', 'admin'],
+        message: '{VALUE} không phải là vai trò hợp lệ',
+      },
+      default: 'user',
+      index: true,
+    },
+    status: {
+      type: String,
+      enum: {
+        values: ['active', 'locked'],
+        message: '{VALUE} không phải trạng thái hợp lệ',
+      },
+      default: 'active',
+      index: true,
+    },
     // Expo push token của các thiết bị đã đăng nhập (để gửi nhắc hóa đơn)
     pushTokens: {
       type: [

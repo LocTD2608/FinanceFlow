@@ -31,12 +31,12 @@ exports.register = async (req, res) => {
       currency: 'VND',
     });
 
-    const token = jwt.sign({ id: newUser._id, email: newUser.email }, JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ id: newUser._id, email: newUser.email, role: newUser.role || 'user' }, JWT_SECRET, { expiresIn: '7d' });
 
     return res.status(201).json({
       success: true,
       message: 'Đăng ký thành công!',
-      user: { id: newUser._id, username, phone, email, authProvider: 'local' },
+      user: { id: newUser._id, username, phone, email, authProvider: 'local', role: newUser.role || 'user', status: newUser.status || 'active' },
       token,
     });
   } catch (error) {
@@ -66,6 +66,13 @@ exports.login = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Tài khoản không tồn tại.' });
     }
 
+    if (user.status === 'locked') {
+      return res.status(403).json({
+        success: false,
+        message: 'Tài khoản của bạn đã bị khóa bởi Quản trị viên. Vui lòng liên hệ hỗ trợ.',
+      });
+    }
+
     if (!user.passwordHash) {
       return res.status(401).json({
         success: false,
@@ -81,11 +88,11 @@ exports.login = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Mật khẩu không chính xác.' });
     }
 
-    const token = jwt.sign({ id: user._id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ id: user._id, email: user.email, role: user.role || 'user' }, JWT_SECRET, { expiresIn: '7d' });
     return res.json({
       success: true,
       message: 'Đăng nhập thành công!',
-      user: { id: user._id, username: user.username, phone: user.phone, email: user.email, authProvider: user.authProvider || 'local', avatar: user.avatar },
+      user: { id: user._id, username: user.username, phone: user.phone, email: user.email, authProvider: user.authProvider || 'local', avatar: user.avatar, role: user.role || 'user', status: user.status || 'active' },
       token,
     });
   } catch (error) {
@@ -122,6 +129,12 @@ exports.socialLogin = async (req, res) => {
     });
 
     if (user) {
+      if (user.status === 'locked') {
+        return res.status(403).json({
+          success: false,
+          message: 'Tài khoản của bạn đã bị khóa bởi Quản trị viên. Vui lòng liên hệ hỗ trợ.',
+        });
+      }
       // Cập nhật thông tin nếu cần
       let updated = false;
       if (!user.oauthId) {
@@ -159,7 +172,7 @@ exports.socialLogin = async (req, res) => {
     }
 
     // 4. Ký token JWT
-    const token = jwt.sign({ id: user._id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ id: user._id, email: user.email, role: user.role || 'user' }, JWT_SECRET, { expiresIn: '7d' });
 
     return res.status(200).json({
       success: true,
@@ -171,6 +184,8 @@ exports.socialLogin = async (req, res) => {
         phone: user.phone || '',
         authProvider: user.authProvider || providerNorm,
         avatar: user.avatar || null,
+        role: user.role || 'user',
+        status: user.status || 'active',
       },
       token,
     });
