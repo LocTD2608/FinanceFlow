@@ -17,6 +17,7 @@ import {
   CircleAlert,
   ShieldCheck,
 } from 'lucide-react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { securityApi } from '../api/security';
 import { PinDots, NumericKeypad } from './PinInputModal';
 
@@ -142,6 +143,7 @@ export default function PinSetupModal({
   const handleEnableBiometric = async () => {
     setLoading(true);
     try {
+      await AsyncStorage.setItem('@financeflow_biometric_pin', confirmPin || firstPin);
       await securityApi.toggleBiometric(token, true);
     } catch {
       // ignore error, pin is already set

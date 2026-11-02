@@ -268,12 +268,14 @@ export default function PaymentScreen({
     setPinError('');
 
     try {
+      const idempotencyKey = `p2p_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
       const res = await p2pApi.transfer(token || undefined, {
         recipientId: recipient.id || recipient._id || '',
         amount: numericAmount,
         note: note.trim() || undefined,
         pin,
         walletId: wallet?._id || wallet?.id,
+        idempotencyKey,
       });
 
       if (res.success && res.data) {
@@ -332,6 +334,11 @@ export default function PaymentScreen({
   // Handle biometric success
   const handleBiometricSuccess = async () => {
     try {
+      const bioPin = await AsyncStorage.getItem('@financeflow_biometric_pin');
+      if (bioPin && /^\d{6}$/.test(bioPin)) {
+        handleConfirmPin(bioPin);
+        return;
+      }
       // In offline mode, retrieve stored pin to execute transfer seamlessly
       const raw = await AsyncStorage.getItem('@financeflow_offline_security');
       if (raw) {

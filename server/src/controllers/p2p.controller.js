@@ -5,6 +5,7 @@ const Wallet = require('../models/Wallet');
 const Transaction = require('../models/Transaction');
 const P2PTransfer = require('../models/P2PTransfer');
 const pushService = require('../services/push.service');
+const realtimeService = require('../services/realtime.service');
 
 const LOCK_TIME_MS = 15 * 60 * 1000; // 15 phút
 const MAX_FAILED_ATTEMPTS = 5;
@@ -406,6 +407,30 @@ exports.transfer = async (req, res) => {
       });
     } catch (pushErr) {
       console.error('[p2p] Gửi push notification lỗi:', pushErr.message);
+    }
+
+    // 9.1 Phát sự kiện biến động số dư Realtime qua Socket.io
+    try {
+      realtimeService.emitBalanceChange(recipient._id.toString(), {
+        type: 'transfer',
+        direction: 'in',
+        amount: numericAmount,
+        walletId: recipientWallet._id.toString(),
+        walletName: recipientWallet.name,
+        newBalance: updatedRecipientWallet.balance,
+        note: `Nhận tiền từ ${senderName}${cleanNote ? ': ' + cleanNote : ''}`,
+      });
+      realtimeService.emitBalanceChange(sender._id.toString(), {
+        type: 'transfer',
+        direction: 'out',
+        amount: numericAmount,
+        walletId: senderWallet._id.toString(),
+        walletName: senderWallet.name,
+        newBalance: updatedSenderWallet.balance,
+        note: `Chuyển tiền đến ${recipientName}${cleanNote ? ': ' + cleanNote : ''}`,
+      });
+    } catch (realtimeErr) {
+      // ignore
     }
 
     // 10. Trả về kết quả
