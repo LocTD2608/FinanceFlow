@@ -16,7 +16,7 @@ const transactionSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Category',
       required: function () {
-        return this.type !== 'transfer' && this.type !== 'p2p_out' && this.type !== 'p2p_in';
+        return !['transfer', 'transfer_out', 'transfer_in', 'p2p_out', 'p2p_in'].includes(this.type);
       },
     },
     // Chỉ có giá trị khi type === 'transfer'
@@ -30,6 +30,21 @@ const transactionSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       default: null,
+    },
+    counterpartUserId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    counterpartName: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    transferNote: {
+      type: String,
+      trim: true,
+      default: '',
     },
     // Gom các bút toán liên quan (ví dụ P2P, Goal)
     groupId: {
@@ -56,7 +71,7 @@ const transactionSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ['expense', 'income', 'transfer', 'p2p_out', 'p2p_in'],
+      enum: ['expense', 'income', 'transfer', 'transfer_out', 'transfer_in', 'p2p_out', 'p2p_in'],
       required: true,
     },
     transactionDate: {

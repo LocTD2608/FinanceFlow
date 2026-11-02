@@ -6,8 +6,14 @@ const router = express.Router();
 
 router.use(auth);
 
-router.get('/lookup', ctrl.lookup);
+// Tra cứu người nhận
+router.get('/lookup', ctrl.lookupRecipient);
+
+// Chuyển tiền P2P
+router.post('/transfer', ctrl.transfer);
 router.post('/transfers', ctrl.transfer);
+
+// Lịch sử giao dịch P2P
 router.get('/transfers', ctrl.listTransfers);
 router.get('/transfers/:id', ctrl.getTransferById);
 

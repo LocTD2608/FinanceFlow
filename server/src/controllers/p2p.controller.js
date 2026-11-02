@@ -1,52 +1,422 @@
 const mongoose = require('mongoose');
-const Wallet = require('../models/Wallet');
+const bcrypt = require('bcryptjs');
 const User = require('../models/User');
+const Wallet = require('../models/Wallet');
 const Transaction = require('../models/Transaction');
 const P2PTransfer = require('../models/P2PTransfer');
-const { runInTransaction } = require('../utils/dbTransaction');
-const { insufficientBody } = require('../utils/walletBalance');
 const pushService = require('../services/push.service');
 
-const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
-const fail = (res, status, message, extra = {}) =>
-  res.status(status).json({ success: false, message, ...extra });
+const LOCK_TIME_MS = 15 * 60 * 1000; // 15 phút
+const MAX_FAILED_ATTEMPTS = 5;
+const MIN_AMOUNT = 1000; // 1.000 VND
+const MAX_AMOUNT = 10000000; // 10.000.000 VND
 
-const P2P_MAX_AMOUNT = 50000000; // 50.000.000 VND
+const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 
 /**
- * GET /api/p2p/lookup?accountNumber=
- * Tra cứu thông tin người nhận theo số tài khoản 10 chữ số
+ * GET /api/p2p/lookup?query=... (hoặc ?accountNumber=...)
+ * Tra cứu thông tin người nhận an toàn (bỏ qua mật khẩu, PIN hash). Chặn tự tra cứu chính mình.
  */
-exports.lookup = async (req, res) => {
+exports.lookupRecipient = async (req, res) => {
   try {
-    const { accountNumber } = req.query;
-    if (!accountNumber || !/^\d{10}$/.test(String(accountNumber).trim())) {
-      return fail(res, 400, 'Số tài khoản phải gồm đúng 10 chữ số.');
+    const rawQuery = req.query.query || req.query.accountNumber;
+    if (!rawQuery || typeof rawQuery !== 'string' || !rawQuery.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Vui lòng cung cấp thông tin tra cứu (username, email, SĐT hoặc ID).',
+      });
     }
 
-    const accStr = String(accountNumber).trim();
-    const wallet = await Wallet.findOne({
-      accountNumber: accStr,
-      isArchived: { $ne: true },
-    }).populate('userId', 'username email avatar');
+    const q = rawQuery.trim();
 
-    if (!wallet || !wallet.userId) {
-      return fail(res, 404, 'Không tìm thấy tài khoản thụ hưởng tương ứng với số tài khoản này.');
+    // Chặn nhanh nếu query trùng ID người đang đăng nhập
+    if (String(req.user.id) === q) {
+      return res.status(400).json({
+        success: false,
+        message: 'Không thể tự chuyển tiền cho chính mình.',
+      });
     }
 
-    const isSelf = String(wallet.userId._id) === String(req.user.id);
+    // Xử lý nếu query là chuỗi JSON từ QR code
+    let parsedQrUserId = null;
+    if (q.startsWith('{') && q.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(q);
+        if (parsed.userId && isValidId(parsed.userId)) {
+          parsedQrUserId = parsed.userId;
+        }
+      } catch (e) {
+        // bỏ qua nếu không phải JSON hợp lệ
+      }
+    }
 
-    return res.json({
+    const filter = [];
+    if (parsedQrUserId) {
+      filter.push({ _id: parsedQrUserId });
+    }
+    if (isValidId(q)) {
+      filter.push({ _id: q });
+    }
+    filter.push({ username: { $regex: `^${q}$`, $options: 'i' } });
+    filter.push({ phone: q });
+    filter.push({ email: q.toLowerCase() });
+    filter.push({ qrCodePayload: q });
+
+    let recipient = await User.findOne({ $or: filter });
+
+    // Nếu không tìm thấy qua User, thử tìm qua Wallet.accountNumber (hỗ trợ số tài khoản 10 số)
+    if (!recipient && /^\d{10}$/.test(q)) {
+      const wallet = await Wallet.findOne({ accountNumber: q, isArchived: { $ne: true } }).populate('userId');
+      if (wallet && wallet.userId) {
+        recipient = wallet.userId;
+      }
+    }
+
+    if (!recipient) {
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy người nhận tương ứng.',
+      });
+    }
+
+    // Chặn tự chuyển tiền cho chính mình
+    if (String(recipient._id) === String(req.user.id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Không thể tự chuyển tiền cho chính mình.',
+      });
+    }
+
+    const safeRecipient = {
+      id: recipient._id,
+      _id: recipient._id,
+      username: recipient.username || '',
+      nickname: recipient.nickname || recipient.username || 'Người dùng FinanceFlow',
+      phone: recipient.phone || '',
+      email: recipient.email || '',
+      avatar: recipient.avatar || null,
+    };
+
+    return res.status(200).json({
       success: true,
+      data: safeRecipient,
+      recipient: safeRecipient,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Lỗi server: ' + error.message });
+  }
+};
+
+// Alias tương thích ngược
+exports.lookup = exports.lookupRecipient;
+
+/**
+ * POST /api/p2p/transfer
+ * Chuyển tiền P2P nguyên tử giữa 2 người dùng kèm bảo mật PIN & số dư
+ */
+exports.transfer = async (req, res) => {
+  try {
+    const senderId = req.user.id;
+    const {
+      recipientId,
+      toAccountNumber,
+      amount,
+      note,
+      pin,
+      idempotencyKey,
+      walletId,
+      fromWalletId,
+    } = req.body || {};
+
+    // 1. Xác định người nhận
+    let targetRecipientId = recipientId;
+    if (!targetRecipientId && toAccountNumber && /^\d{10}$/.test(String(toAccountNumber).trim())) {
+      const targetWallet = await Wallet.findOne({
+        accountNumber: String(toAccountNumber).trim(),
+        isArchived: { $ne: true },
+      });
+      if (targetWallet) {
+        targetRecipientId = targetWallet.userId;
+      }
+    }
+
+    if (!targetRecipientId || !isValidId(targetRecipientId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Thông tin người nhận không hợp lệ.',
+      });
+    }
+
+    // Chặn tự chuyển tiền cho chính mình
+    if (String(targetRecipientId) === String(senderId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Không thể tự chuyển tiền cho chính mình.',
+      });
+    }
+
+    // 2. Validate số tiền chuyển
+    const numericAmount = Number(amount);
+    if (!Number.isFinite(numericAmount) || numericAmount < MIN_AMOUNT || numericAmount > MAX_AMOUNT) {
+      return res.status(400).json({
+        success: false,
+        message: `Số tiền chuyển phải từ ${MIN_AMOUNT.toLocaleString('vi-VN')} đ đến ${MAX_AMOUNT.toLocaleString('vi-VN')} đ.`,
+      });
+    }
+
+    // 3. Kiểm tra thông tin người gửi & mã PIN
+    const sender = await User.findById(senderId);
+    if (!sender) {
+      return res.status(404).json({ success: false, message: 'Người gửi không tồn tại.' });
+    }
+
+    if (!sender.transactionPinHash) {
+      return res.status(400).json({
+        success: false,
+        code: 'PIN_NOT_SET',
+        message: 'Bạn chưa cài đặt mã PIN bảo mật ví.',
+      });
+    }
+
+    const now = Date.now();
+    if (sender.pinLockedUntil && new Date(sender.pinLockedUntil).getTime() > now) {
+      const lockRemainingSeconds = Math.max(
+        0,
+        Math.ceil((new Date(sender.pinLockedUntil).getTime() - now) / 1000)
+      );
+      return res.status(403).json({
+        success: false,
+        code: 'PIN_LOCKED',
+        message: `Mã PIN đang bị tạm khóa. Vui lòng thử lại sau ${lockRemainingSeconds} giây.`,
+        lockRemainingSeconds,
+      });
+    }
+
+    if (!pin || !/^\d{6}$/.test(String(pin))) {
+      return res.status(400).json({
+        success: false,
+        code: 'PIN_INVALID',
+        message: 'Mã PIN phải bao gồm đúng 6 chữ số.',
+      });
+    }
+
+    const isMatch = await bcrypt.compare(String(pin), sender.transactionPinHash);
+    if (!isMatch) {
+      sender.failedPinAttempts = (sender.failedPinAttempts || 0) + 1;
+      if (sender.failedPinAttempts >= MAX_FAILED_ATTEMPTS) {
+        sender.pinLockedUntil = new Date(now + LOCK_TIME_MS);
+        await sender.save();
+        return res.status(429).json({
+          success: false,
+          code: 'PIN_LOCKED',
+          message: 'Bạn đã nhập sai mã PIN 5 lần liên tiếp. Tài khoản bị tạm khóa 15 phút.',
+          lockRemainingSeconds: Math.ceil(LOCK_TIME_MS / 1000),
+          attemptsLeft: 0,
+        });
+      }
+
+      const attemptsLeft = MAX_FAILED_ATTEMPTS - sender.failedPinAttempts;
+      await sender.save();
+      return res.status(400).json({
+        success: false,
+        code: 'PIN_INVALID',
+        message: `Mã PIN không chính xác. Bạn còn ${attemptsLeft} lần thử.`,
+        attemptsLeft,
+      });
+    }
+
+    // Đúng PIN: Reset số lần thử sai
+    sender.failedPinAttempts = 0;
+    sender.pinLockedUntil = null;
+    await sender.save();
+
+    // 4. Kiểm tra Idempotency chống chuyển trùng lặp
+    const cleanIdempotencyKey =
+      idempotencyKey && typeof idempotencyKey === 'string' && idempotencyKey.trim()
+        ? idempotencyKey.trim()
+        : null;
+
+    if (cleanIdempotencyKey) {
+      const existingTx = await Transaction.findOne({
+        userId: sender._id,
+        idempotencyKey: cleanIdempotencyKey,
+      });
+      if (existingTx) {
+        const sWallet = await Wallet.findById(existingTx.walletId);
+        return res.status(200).json({
+          success: true,
+          message: 'Giao dịch chuyển tiền này đã được thực hiện trước đó.',
+          idempotent: true,
+          data: {
+            transactionId: existingTx._id,
+            amount: existingTx.amount,
+            recipientName: existingTx.counterpartName,
+            newBalance: sWallet ? sWallet.balance : 0,
+          },
+        });
+      }
+    }
+
+    // 5. Kiểm tra người nhận
+    const recipient = await User.findById(targetRecipientId);
+    if (!recipient) {
+      return res.status(404).json({ success: false, message: 'Người nhận không tồn tại.' });
+    }
+
+    // 6. Kiểm tra ví người gửi
+    const activeWalletId = walletId || fromWalletId;
+    let senderWallet;
+    if (activeWalletId && isValidId(activeWalletId)) {
+      senderWallet = await Wallet.findOne({
+        _id: activeWalletId,
+        userId: sender._id,
+        isArchived: { $ne: true },
+      });
+    } else {
+      const q = Wallet.findOne({
+        userId: sender._id,
+        isArchived: { $ne: true },
+      });
+      senderWallet = q && typeof q.sort === 'function' ? await q.sort({ createdAt: 1 }) : await q;
+    }
+
+    if (!senderWallet) {
+      return res.status(400).json({ success: false, message: 'Không tìm thấy ví thanh toán khả dụng.' });
+    }
+
+    if (senderWallet.balance < numericAmount) {
+      return res.status(400).json({
+        success: false,
+        message: `Số dư ví không đủ để thực hiện chuyển tiền. Số dư hiện tại: ${senderWallet.balance.toLocaleString('vi-VN')} đ.`,
+      });
+    }
+
+    // 7. Lấy hoặc tạo ví người nhận
+    const rq = Wallet.findOne({
+      userId: recipient._id,
+      isArchived: { $ne: true },
+    });
+    let recipientWallet = rq && typeof rq.sort === 'function' ? await rq.sort({ createdAt: 1 }) : await rq;
+
+    if (!recipientWallet) {
+      let accNum = null;
+      try {
+        const { generateAccountNumber } = require('../utils/accountNumber');
+        accNum = await generateAccountNumber();
+      } catch (e) {}
+
+      recipientWallet = await Wallet.create({
+        userId: recipient._id,
+        name: 'Ví tiền mặt',
+        type: 'cash',
+        balance: 0,
+        currency: 'VND',
+        ...(accNum ? { accountNumber: accNum } : {}),
+      });
+    }
+
+    // 8. Thực hiện chuyển tiền nguyên tử
+    const updatedSenderWallet = await Wallet.findOneAndUpdate(
+      { _id: senderWallet._id, balance: { $gte: numericAmount } },
+      { $inc: { balance: -numericAmount } },
+      { new: true }
+    );
+
+    if (!updatedSenderWallet) {
+      return res.status(400).json({
+        success: false,
+        message: 'Số dư ví không đủ hoặc số dư đã thay đổi.',
+      });
+    }
+
+    await Wallet.findByIdAndUpdate(recipientWallet._id, { $inc: { balance: numericAmount } }, { new: true });
+
+    const groupId = new mongoose.Types.ObjectId().toString();
+    const recipientName =
+      recipient.nickname || recipient.username || recipient.email || 'Người dùng FinanceFlow';
+    const senderName =
+      sender.nickname || sender.username || sender.email || 'Người dùng FinanceFlow';
+    const cleanNote = typeof note === 'string' ? note.trim() : '';
+
+    let senderTx;
+    let recipientTx;
+    try {
+      senderTx = await Transaction.create({
+        userId: sender._id,
+        walletId: senderWallet._id,
+        type: 'transfer_out',
+        amount: numericAmount,
+        counterpartUserId: recipient._id,
+        counterpartyUserId: recipient._id,
+        counterpartName: recipientName,
+        note: cleanNote || `Chuyển tiền đến ${recipientName}`,
+        transferNote: cleanNote,
+        groupId,
+        source: 'p2p',
+        transactionDate: new Date(),
+        ...(cleanIdempotencyKey ? { idempotencyKey: cleanIdempotencyKey } : {}),
+      });
+
+      recipientTx = await Transaction.create({
+        userId: recipient._id,
+        walletId: recipientWallet._id,
+        type: 'transfer_in',
+        amount: numericAmount,
+        counterpartUserId: sender._id,
+        counterpartyUserId: sender._id,
+        counterpartName: senderName,
+        note: cleanNote || `Nhận tiền từ ${senderName}`,
+        transferNote: cleanNote,
+        groupId,
+        source: 'p2p',
+        transactionDate: new Date(),
+      });
+
+      // Tạo P2PTransfer record
+      await P2PTransfer.create({
+        senderId: sender._id,
+        receiverId: recipient._id,
+        senderWalletId: senderWallet._id,
+        receiverWalletId: recipientWallet._id,
+        amount: numericAmount,
+        note: cleanNote,
+        status: 'success',
+        groupId,
+        ...(cleanIdempotencyKey ? { idempotencyKey: cleanIdempotencyKey } : {}),
+      }).catch(() => {});
+    } catch (txErr) {
+      // Hoàn tác số dư nếu tạo giao dịch thất bại
+      await Wallet.findByIdAndUpdate(senderWallet._id, { $inc: { balance: numericAmount } });
+      await Wallet.findByIdAndUpdate(recipientWallet._id, { $inc: { balance: -numericAmount } });
+      throw txErr;
+    }
+
+    // 9. Gửi push notification cho người nhận
+    try {
+      await pushService.sendToUser(recipient._id, {
+        title: 'Tiền vào ví! 💰',
+        body: `Bạn vừa nhận được ${numericAmount.toLocaleString('vi-VN')} đ từ ${senderName}.`,
+        data: {
+          type: 'p2p_transfer',
+          transactionId: recipientTx ? recipientTx._id.toString() : '',
+          amount: numericAmount,
+          senderName,
+          note: cleanNote,
+        },
+      });
+    } catch (pushErr) {
+      console.error('[p2p] Gửi push notification lỗi:', pushErr.message);
+    }
+
+    // 10. Trả về kết quả
+    return res.status(200).json({
+      success: true,
+      message: 'Chuyển tiền thành công!',
       data: {
-        accountNumber: wallet.accountNumber,
-        walletName: wallet.name,
-        walletType: wallet.type,
-        bankName: wallet.bankName,
-        receiverId: wallet.userId._id,
-        receiverName: wallet.userId.username || 'Người dùng FinanceFlow',
-        receiverEmail: wallet.userId.email ? wallet.userId.email.replace(/(.{2})(.*)(?=@)/, '$1***') : null,
-        isSelf,
+        transactionId: senderTx._id,
+        amount: numericAmount,
+        recipientName,
+        newBalance: updatedSenderWallet.balance,
       },
     });
   } catch (error) {
@@ -55,250 +425,48 @@ exports.lookup = async (req, res) => {
 };
 
 /**
- * POST /api/p2p/transfers
- * Chuyển tiền P2P giữa hai người dùng (chạy trong transaction)
- */
-exports.transfer = async (req, res) => {
-  try {
-    const senderId = req.user.id;
-    const { toAccountNumber, fromWalletId, amount, note, idempotencyKey } = req.body;
-
-    // 1. Validate tham số đầu vào
-    if (!toAccountNumber || !/^\d{10}$/.test(String(toAccountNumber).trim())) {
-      return fail(res, 400, 'Số tài khoản người nhận phải gồm đúng 10 chữ số.');
-    }
-    const targetAcc = String(toAccountNumber).trim();
-
-    if (!fromWalletId || !isValidId(fromWalletId)) {
-      return fail(res, 400, 'ID ví chuyển tiền không hợp lệ.');
-    }
-
-    const numericAmount = Number(amount);
-    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-      return fail(res, 400, 'Số tiền chuyển phải lớn hơn 0.');
-    }
-    if (numericAmount > P2P_MAX_AMOUNT) {
-      return fail(res, 400, `Số tiền chuyển tối đa mỗi lần là ${P2P_MAX_AMOUNT.toLocaleString('vi-VN')} đ.`);
-    }
-
-    // 2. Kiểm tra Idempotency chống chuyển trùng khi mạng chập chờn
-    if (idempotencyKey && typeof idempotencyKey === 'string' && idempotencyKey.trim()) {
-      const existingTransfer = await P2PTransfer.findOne({
-        senderId,
-        idempotencyKey: idempotencyKey.trim(),
-      })
-        .populate('receiverId', 'username email')
-        .populate('senderWalletId', 'name accountNumber')
-        .populate('receiverWalletId', 'name accountNumber');
-
-      if (existingTransfer) {
-        return res.json({
-          success: true,
-          message: 'Giao dịch chuyển tiền này đã được thực hiện trước đó.',
-          idempotent: true,
-          data: existingTransfer,
-        });
-      }
-    }
-
-    // 3. Thực thi chuyển tiền trong Transaction
-    const transferResult = await runInTransaction(async (session) => {
-      // a. Kiểm tra ví gửi
-      const senderWallet = await Wallet.findOne({
-        _id: fromWalletId,
-        userId: senderId,
-        isArchived: { $ne: true },
-      }).session(session);
-
-      if (!senderWallet) {
-        const err = new Error('Ví gửi không tồn tại hoặc bạn không có quyền truy cập.');
-        err.status = 404;
-        throw err;
-      }
-
-      if (senderWallet.type !== 'credit_card' && senderWallet.balance < numericAmount) {
-        const err = new Error('Số dư trong ví không đủ để thực hiện chuyển tiền.');
-        err.status = 400;
-        err.body = insufficientBody(senderWallet.balance, numericAmount);
-        throw err;
-      }
-
-      // b. Kiểm tra ví nhận
-      const receiverWallet = await Wallet.findOne({
-        accountNumber: targetAcc,
-        isArchived: { $ne: true },
-      }).session(session);
-
-      if (!receiverWallet) {
-        const err = new Error('Số tài khoản thụ hưởng không tồn tại.');
-        err.status = 404;
-        throw err;
-      }
-
-      if (String(receiverWallet.userId) === String(senderId)) {
-        const err = new Error(
-          'Không thể tự chuyển tiền P2P cho chính mình. Hãy dùng tính năng chuyển giữa các ví cá nhân.'
-        );
-        err.status = 400;
-        throw err;
-      }
-
-      // c. Trừ tiền ví gửi có điều kiện số dư
-      const deducted = await Wallet.findOneAndUpdate(
-        {
-          _id: senderWallet._id,
-          $or: [{ type: 'credit_card' }, { balance: { $gte: numericAmount } }],
-        },
-        { $inc: { balance: -numericAmount } },
-        { session, new: true }
-      );
-
-      if (!deducted) {
-        const err = new Error('Số dư ví không đủ.');
-        err.status = 400;
-        err.body = insufficientBody(senderWallet.balance, numericAmount);
-        throw err;
-      }
-
-      // d. Cộng tiền ví nhận
-      await Wallet.findByIdAndUpdate(
-        receiverWallet._id,
-        { $inc: { balance: numericAmount } },
-        { session, new: true }
-      );
-
-      // e. Tạo 2 Transaction (p2p_out và p2p_in) chung groupId
-      const groupId = 'p2p_' + new mongoose.Types.ObjectId().toString();
-
-      await Transaction.create(
-        [
-          {
-            userId: senderId,
-            walletId: senderWallet._id,
-            amount: numericAmount,
-            type: 'p2p_out',
-            counterpartyUserId: receiverWallet.userId,
-            groupId,
-            source: 'p2p',
-            note: note ? note.trim() : `Chuyển tiền P2P tới STK ${targetAcc}`,
-            transactionDate: new Date(),
-          },
-        ],
-        { session }
-      );
-
-      await Transaction.create(
-        [
-          {
-            userId: receiverWallet.userId,
-            walletId: receiverWallet._id,
-            amount: numericAmount,
-            type: 'p2p_in',
-            counterpartyUserId: senderId,
-            groupId,
-            source: 'p2p',
-            note: note ? note.trim() : `Nhận tiền P2P từ STK ${senderWallet.accountNumber || 'nội bộ'}`,
-            transactionDate: new Date(),
-          },
-        ],
-        { session }
-      );
-
-      // f. Tạo bản ghi P2PTransfer
-      const [p2pDoc] = await P2PTransfer.create(
-        [
-          {
-            senderId,
-            receiverId: receiverWallet.userId,
-            senderWalletId: senderWallet._id,
-            receiverWalletId: receiverWallet._id,
-            amount: numericAmount,
-            note: note ? note.trim() : '',
-            status: 'success',
-            groupId,
-            idempotencyKey: idempotencyKey ? idempotencyKey.trim() : null,
-          },
-        ],
-        { session }
-      );
-
-      return {
-        transfer: p2pDoc,
-        receiverUserId: receiverWallet.userId,
-        senderWallet,
-      };
-    });
-
-    // 4. Bắn push notification cho người nhận (nếu có cấu hình) sau khi commit thành công
-    try {
-      if (pushService && typeof pushService.sendPushToUser === 'function') {
-        const senderUser = await User.findById(senderId).select('username');
-        const senderName = senderUser?.username || 'Một người dùng';
-        await pushService.sendPushToUser(transferResult.receiverUserId, {
-          title: 'Biến động số dư +',
-          body: `Bạn vừa nhận được ${numericAmount.toLocaleString('vi-VN')} đ từ ${senderName}.`,
-          data: { type: 'p2p_received', transferId: transferResult.transfer._id },
-        });
-      }
-    } catch {
-      // Push notification không được làm gián đoạn response thành công
-    }
-
-    return res.status(201).json({
-      success: true,
-      message: 'Chuyển tiền thành công!',
-      data: transferResult.transfer,
-    });
-  } catch (error) {
-    if (error.body) {
-      return res.status(error.status || 400).json(error.body);
-    }
-    const status = error.status || 500;
-    return res.status(status).json({ success: false, message: error.message });
-  }
-};
-
-/**
- * GET /api/p2p/transfers?direction=in|out|all&page=1&limit=20
- * Lịch sử chuyển nhận tiền P2P
+ * GET /api/p2p/transfers
+ * Lịch sử giao dịch P2P của người dùng
  */
 exports.listTransfers = async (req, res) => {
   try {
     const userId = req.user.id;
     const { direction = 'all', page = 1, limit = 20 } = req.query;
 
-    const filter = {};
-    if (direction === 'out') {
-      filter.senderId = userId;
-    } else if (direction === 'in') {
-      filter.receiverId = userId;
-    } else {
-      filter.$or = [{ senderId: userId }, { receiverId: userId }];
-    }
-
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
     const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
     const skip = (pageNum - 1) * limitNum;
 
-    const total = await P2PTransfer.countDocuments(filter);
-    const transfers = await P2PTransfer.find(filter)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limitNum)
-      .populate('senderId', 'username email avatar')
-      .populate('receiverId', 'username email avatar')
-      .populate('senderWalletId', 'name accountNumber bankName type')
-      .populate('receiverWalletId', 'name accountNumber bankName type')
-      .lean();
+    let filter = {};
+    if (direction === 'out') {
+      filter = { userId, type: 'transfer_out' };
+    } else if (direction === 'in') {
+      filter = { userId, type: 'transfer_in' };
+    } else {
+      filter = { userId, type: { $in: ['transfer_out', 'transfer_in'] } };
+    }
+
+    const [transfers, total] = await Promise.all([
+      Transaction.find(filter)
+        .sort({ transactionDate: -1, createdAt: -1 })
+        .skip(skip)
+        .limit(limitNum)
+        .populate('counterpartUserId', 'username nickname avatar email phone')
+        .populate('walletId', 'name type accountNumber')
+        .lean(),
+      Transaction.countDocuments(filter),
+    ]);
 
     return res.json({
       success: true,
-      data: transfers,
-      pagination: {
-        total,
-        page: pageNum,
-        limit: limitNum,
-        totalPages: Math.ceil(total / limitNum) || 1,
+      data: {
+        transfers,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          totalPages: Math.ceil(total / limitNum),
+        },
       },
     });
   } catch (error) {
@@ -308,25 +476,28 @@ exports.listTransfers = async (req, res) => {
 
 /**
  * GET /api/p2p/transfers/:id
- * Chi tiết một giao dịch P2P
+ * Chi tiết giao dịch P2P
  */
 exports.getTransferById = async (req, res) => {
   try {
     const userId = req.user.id;
     const { id } = req.params;
-    if (!isValidId(id)) return fail(res, 400, 'ID giao dịch không hợp lệ.');
 
-    const transfer = await P2PTransfer.findOne({
+    if (!isValidId(id)) {
+      return res.status(400).json({ success: false, message: 'ID giao dịch không hợp lệ.' });
+    }
+
+    const transfer = await Transaction.findOne({
       _id: id,
-      $or: [{ senderId: userId }, { receiverId: userId }],
+      userId,
+      type: { $in: ['transfer_out', 'transfer_in'] },
     })
-      .populate('senderId', 'username email avatar')
-      .populate('receiverId', 'username email avatar')
-      .populate('senderWalletId', 'name accountNumber bankName type')
-      .populate('receiverWalletId', 'name accountNumber bankName type')
-      .lean();
+      .populate('counterpartUserId', 'username nickname avatar email phone')
+      .populate('walletId', 'name type accountNumber');
 
-    if (!transfer) return fail(res, 404, 'Không tìm thấy giao dịch chuyển tiền.');
+    if (!transfer) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy thông tin giao dịch.' });
+    }
 
     return res.json({ success: true, data: transfer });
   } catch (error) {
