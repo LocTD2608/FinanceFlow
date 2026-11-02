@@ -59,6 +59,7 @@ interface Props {
   onBackToHome?: () => void;
   onNavigateToTab?: (tab: 'finance' | 'payment' | 'cash' | 'save' | 'chart' | 'settings') => void;
   hideBottomBar?: boolean;
+  initialTab?: 'scan' | 'my_qr';
 }
 
 type MainTab = 'scan' | 'my_qr';
@@ -97,13 +98,25 @@ interface TransferReceipt {
   note: string;
 }
 
-export default function PaymentScreen({ onBackToHome, onNavigateToTab }: Props) {
+export default function PaymentScreen({
+  onBackToHome,
+  onNavigateToTab,
+  hideBottomBar,
+  initialTab = 'scan',
+}: Props) {
   const { user, token } = useAuthStore();
   const { fetchTransactions, fetchSummary } = useTransactionStore();
 
   // Top tabs & Steps
-  const [activeTab, setActiveTab] = useState<MainTab>('scan');
+  const [activeTab, setActiveTab] = useState<MainTab>(initialTab);
   const [step, setStep] = useState<PaymentStep>('main');
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+      setStep('main');
+    }
+  }, [initialTab]);
 
   // Wallet & Server categories
   const [wallet, setWallet] = useState<WalletItem | null>(null);

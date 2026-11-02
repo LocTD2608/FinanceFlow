@@ -60,6 +60,7 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
   // Khởi tạo tháng hiện tại (mặc định lấy tháng thực tế của hệ thống)
   const [currentMonthIndex, setCurrentMonthIndex] = useState(new Date().getMonth() + 1);
   const [activeTab, setActiveTab] = useState<'finance' | 'payment' | 'cash' | 'save' | 'chart' | 'settings'>('finance');
+  const [paymentInitialTab, setPaymentInitialTab] = useState<'scan' | 'my_qr'>('scan');
   const [refreshing, setRefreshing] = useState(false);
   const [wallets, setWallets] = useState<WalletItem[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -295,6 +296,7 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
       case 'payment':
         return (
           <PaymentScreen
+            initialTab={paymentInitialTab}
             onBackToHome={() => {
               loadWallets();
               loadData(currentMonthIndex);
@@ -499,21 +501,44 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
                 }}
               />
 
-              {/* Nút hành động nhanh: Quét QR & Thanh toán */}
-              <TouchableOpacity
-                style={styles.quickPayBanner}
-                onPress={() => setActiveTab('payment')}
-                activeOpacity={0.8}
-              >
-                <View style={styles.quickPayIconBox}>
-                  <QrCode size={20} color="#0284C7" />
-                </View>
-                <View style={styles.quickPayTextContainer}>
-                  <Text style={styles.quickPayTitle}>Quét mã QR thanh toán</Text>
-                  <Text style={styles.quickPaySubtitle}>Chuyển tiền & phân loại tự động vào ngân sách</Text>
-                </View>
-                <ChevronRight size={18} color="#64748B" />
-              </TouchableOpacity>
+              {/* Nút hành động nhanh: Quét QR & Thanh toán / Nhận tiền */}
+              <View style={styles.quickPayContainer}>
+                <TouchableOpacity
+                  style={styles.quickPayBanner}
+                  onPress={() => {
+                    setPaymentInitialTab('scan');
+                    setActiveTab('payment');
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.quickPayIconBox}>
+                    <QrCode size={20} color="#0284C7" />
+                  </View>
+                  <View style={styles.quickPayTextContainer}>
+                    <Text style={styles.quickPayTitle}>Quét mã QR thanh toán</Text>
+                    <Text style={styles.quickPaySubtitle}>Chuyển tiền & phân loại tự động vào ngân sách</Text>
+                  </View>
+                  <ChevronRight size={18} color="#64748B" />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.myQrBanner}
+                  onPress={() => {
+                    setPaymentInitialTab('my_qr');
+                    setActiveTab('payment');
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.myQrIconBox}>
+                    <QrCode size={20} color="#059669" />
+                  </View>
+                  <View style={styles.quickPayTextContainer}>
+                    <Text style={styles.myQrTitle}>Mã QR của tôi</Text>
+                    <Text style={styles.quickPaySubtitle}>Nhận tiền chuyển khoản P2P nhanh chóng</Text>
+                  </View>
+                  <ChevronRight size={18} color="#059669" />
+                </TouchableOpacity>
+              </View>
 
               {/* Biểu đồ chi tiêu theo ngày từ API /api/reports/daily */}
               <DailyExpenseChart
@@ -1011,11 +1036,14 @@ const styles = StyleSheet.create({
     color: '#0F172A',
     fontWeight: '800',
   },
+  quickPayContainer: {
+    marginVertical: 12,
+    gap: 10,
+  },
   quickPayBanner: {
     backgroundColor: '#FFFFFF',
     borderRadius: 20,
     padding: 14,
-    marginVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
@@ -1045,5 +1073,33 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#64748B',
     marginTop: 2,
+  },
+  myQrBanner: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    shadowColor: '#059669',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  myQrIconBox: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: '#ECFDF5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  myQrTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#065F46',
   },
 });
