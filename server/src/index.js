@@ -1,5 +1,7 @@
 require('dotenv').config();
+const http = require('http');
 const express = require('express');
+const { initSocket } = require('./socket');
 const cors = require('cors');
 
 // Connect to MongoDB
@@ -78,14 +80,17 @@ app.get('/api/health', (req, res) => {
 // ──────────────────────────────────────────────
 // Khởi động server
 // ──────────────────────────────────────────────
+const server = http.createServer(app);
+initSocket(server);
+
 const start = async () => {
   await connectDB(); // Kết nối MongoDB trước khi mở cổng
   if (process.env.ENABLE_CRON !== 'false') {
     require('./jobs/netWorth.job').start();
     require('./jobs/billReminder.job').start();
   }
-  app.listen(PORT, () => {
-    console.log(`🚀 FinanceFlow Backend đang chạy tại http://localhost:${PORT}`);
+  server.listen(PORT, () => {
+    console.log(`🚀 FinanceFlow Backend & WebSocket đang chạy tại http://localhost:${PORT}`);
   });
 };
 
