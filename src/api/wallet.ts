@@ -220,7 +220,25 @@ export const walletApi = {
    */
   async topupWallet(token: string | undefined, walletId: string, input: TopupInput, idempotencyKey = newKey()): Promise<ApiResult> {
     try {
-      const res = await request(`/${walletId}/topup`, 'POST', token, { ...input, idempotencyKey });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const res = await fetch(`${ROOT_API_URL}/transactions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token && { Authorization: `Bearer ${token}` }),
+        },
+        body: JSON.stringify({
+          walletId,
+          type: 'income',
+          amount: input.amount,
+          categoryId: input.categoryId,
+          note: input.note || 'Nạp tiền vào ví',
+          idempotencyKey,
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
       return await res.json();
     } catch {
       const amount = Number(input.amount);

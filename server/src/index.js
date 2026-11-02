@@ -15,6 +15,9 @@ const netWorthRoutes = require('./routes/netWorth.routes');
 const billReminderRoutes = require('./routes/billReminder.routes');
 const adminRoutes = require('./routes/admin.routes');
 const securityRoutes = require('./routes/security.routes');
+const p2pRoutes = require('./routes/p2p.routes');
+const reportRoutes = require('./routes/report.routes');
+const goalRoutes = require('./routes/goal.routes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -58,6 +61,14 @@ app.use('/api/admin', adminRoutes);
 
 // 11. Quản lý bảo mật ví, mã PIN & xác thực sinh trắc học
 app.use('/api/security/pin', securityRoutes);
+// 10. Chuyển tiền nội bộ P2P
+app.use('/api/p2p', p2pRoutes);
+
+// 11. Báo cáo tài chính & Biểu đồ
+app.use('/api/reports', reportRoutes);
+
+// 12. Quản lý mục tiêu tài chính (Tiết kiệm)
+app.use('/api/goals', goalRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

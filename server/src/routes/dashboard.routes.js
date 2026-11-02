@@ -7,6 +7,7 @@ const router = express.Router();
 router.use(auth);
 
 router.get('/summary', ctrl.summary);
+router.get('/overview', ctrl.overview);
 router.get('/breakdown', ctrl.breakdown);
 
 module.exports = router;

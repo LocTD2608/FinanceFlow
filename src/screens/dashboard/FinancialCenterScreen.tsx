@@ -30,6 +30,8 @@ import { useAuthStore } from '../../store/useAuthStore';
 import { useTransactionStore } from '../../store/useTransactionStore';
 import { transactionApi, TransactionItem } from '../../api/transaction';
 import { walletApi, WalletItem } from '../../api/wallet';
+import { dashboardApi, CategoryBreakdownItem } from '../../api/dashboard';
+import DailyExpenseChart from '../../components/DailyExpenseChart';
 import TopupModal from '../../components/TopupModal';
 import NetWorthCard from '../../components/NetWorthCard';
 import BillRemindersCard from '../../components/BillRemindersCard';
@@ -77,17 +79,33 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
   const defaultWallet = activeWallets[0] || null;
   const [prevMonthExpense, setPrevMonthExpense] = useState<number>(0);
   const [allTransactions, setAllTransactions] = useState<TransactionItem[]>([]);
+  const [breakdownItems, setBreakdownItems] = useState<CategoryBreakdownItem[]>([]);
+  const [breakdownTotal, setBreakdownTotal] = useState<number>(0);
 
   const loadData = useCallback(async (monthIdx: number) => {
     const monthStr = `${currentYear}-${String(monthIdx).padStart(2, '0')}`;
     const prevIdx = monthIdx > 1 ? monthIdx - 1 : 12;
     const prevMonthStr = `${monthIdx > 1 ? currentYear : currentYear - 1}-${String(prevIdx).padStart(2, '0')}`;
 
-    const [sumRes, txRes, allTxRes] = await Promise.all([
+    const [sumRes, txRes, allTxRes, breakdownRes] = await Promise.all([
       fetchSummary(token || undefined, monthStr),
       fetchTransactions(token || undefined, monthStr),
       transactionApi.getTransactions(token || undefined, { limit: 1000 }),
+      dashboardApi.getBreakdown(token || undefined, {
+        type: 'expense',
+        period: 'month',
+        date: `${monthStr}-01`,
+      }),
     ]);
+
+    // Cập nhật dữ liệu phân bổ danh mục thật từ backend API
+    if (breakdownRes?.success && breakdownRes.data) {
+      setBreakdownItems(breakdownRes.data.items || []);
+      setBreakdownTotal(breakdownRes.data.total || 0);
+    } else {
+      setBreakdownItems([]);
+      setBreakdownTotal(0);
+    }
 
     // Lấy thêm summary tháng trước để tính so sánh chênh lệch
     try {
@@ -156,45 +174,7 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
     return val.toLocaleString('vi-VN');
   };
 
-  // Phân tích tỷ lệ chi tiêu theo danh mục cho biểu đồ Donut Chart
-  const { foodPercent, otherPercent, angles } = useMemo(() => {
-    const expenses = transactions.filter((t) => t.type === 'expense');
-    let foodTotal = 0;
-    let otherTotal = 0;
-
-    expenses.forEach((t) => {
-      const noteLower = (t.note || '').toLowerCase();
-      if (
-        noteLower.includes('ăn') ||
-        noteLower.includes('uống') ||
-        noteLower.includes('cơm') ||
-        noteLower.includes('phở') ||
-        noteLower.includes('cafe') ||
-        noteLower.includes('food')
-      ) {
-        foodTotal += t.amount;
-      } else {
-        otherTotal += t.amount;
-      }
-    });
-
-    const total = foodTotal + otherTotal;
-    let fPct = 65;
-    let oPct = 35;
-
-    if (total > 0) {
-      fPct = Math.round((foodTotal / total) * 100);
-      oPct = 100 - fPct;
-    }
-
-    // Góc cung tương ứng trên đường tròn 360 độ
-    const a1 = Math.round((fPct / 100) * 360);
-    return {
-      foodPercent: fPct,
-      otherPercent: oPct,
-      angles: { a1 },
-    };
-  }, [transactions]);
+  const PALETTE = ['#0284C7', '#F59E0B', '#10B981', '#EC4899', '#8B5CF6', '#F97316', '#06B6D4', '#64748B'];
 
   // Helper tính góc thành tọa độ cho SVG Donut
   const polarToCartesian = (cx: number, cy: number, r: number, angleDeg: number) => {
@@ -214,12 +194,16 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
     startAngle: number,
     endAngle: number
   ) => {
-    const startOuter = polarToCartesian(cx, cy, outerR, endAngle);
+    let actualEnd = endAngle;
+    if (actualEnd - startAngle >= 359.99) {
+      actualEnd = startAngle + 359.9;
+    }
+    const startOuter = polarToCartesian(cx, cy, outerR, actualEnd);
     const endOuter = polarToCartesian(cx, cy, outerR, startAngle);
-    const startInner = polarToCartesian(cx, cy, innerR, endAngle);
+    const startInner = polarToCartesian(cx, cy, innerR, actualEnd);
     const endInner = polarToCartesian(cx, cy, innerR, startAngle);
 
-    const largeArc = endAngle - startAngle <= 180 ? 0 : 1;
+    const largeArc = actualEnd - startAngle <= 180 ? 0 : 1;
 
     return [
       `M ${startOuter.x} ${startOuter.y}`,
@@ -230,10 +214,32 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
     ].join(' ');
   };
 
-  const cx = 150;
-  const cy = 150;
+  const cx = 130;
+  const cy = 130;
   const innerR = 64;
-  const outerR = 120;
+  const outerR = 110;
+
+  // Tính toán các cung Donut arc động từ breakdownItems
+  const donutArcs = useMemo(() => {
+    if (!breakdownItems.length || breakdownTotal <= 0) return [];
+
+    let currentAngle = 0;
+    return breakdownItems.map((item, idx) => {
+      const angleSpan = (item.amount / breakdownTotal) * 360;
+      const startAngle = currentAngle;
+      const endAngle = currentAngle + angleSpan;
+      currentAngle = endAngle;
+
+      const color = item.color && item.color !== '#6B7280' ? item.color : PALETTE[idx % PALETTE.length];
+
+      return {
+        ...item,
+        color,
+        startAngle,
+        endAngle,
+      };
+    });
+  }, [breakdownItems, breakdownTotal]);
 
   // Animation values cho chuyển trang mượt mà
   const pageOpacity = useRef(new Animated.Value(1)).current;
@@ -413,7 +419,14 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
 
                 {/* Ô Lớn: Số tiền hiện tại */}
                 <View style={styles.mainBalanceBox}>
-                  <Text style={styles.mainBalanceLabel}>Số tiền hiện tại</Text>
+                  <View style={styles.mainBalanceHeader}>
+                    <Text style={styles.mainBalanceLabel}>Số tiền hiện tại</Text>
+                    {!!defaultWallet?.accountNumber && (
+                      <View style={styles.accountBadge}>
+                        <Text style={styles.accountBadgeText}>STK: {defaultWallet.accountNumber}</Text>
+                      </View>
+                    )}
+                  </View>
                   <View style={styles.amountRow}>
                     <Text style={styles.currencySymbol}>đ</Text>
                     <Text style={styles.mainBalanceAmount}>{formatCurrency(currentBalance)}</Text>
@@ -457,27 +470,6 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
                 </Text>
               </View>
 
-              {/* Hành động ví: Nạp tiền */}
-              <TouchableOpacity
-                style={[
-                  styles.walletActionBtn,
-                  {
-                    backgroundColor: '#DCFCE7',
-                    flexDirection: 'row',
-                    gap: 8,
-                    marginBottom: 14,
-                  },
-                ]}
-                onPress={() => {
-                  setTopupSuggest(0);
-                  setTopupVisible(true);
-                }}
-                activeOpacity={0.8}
-                disabled={!defaultWallet}
-              >
-                <Plus size={18} color="#15803D" strokeWidth={2.5} />
-                <Text style={[styles.walletActionText, { color: '#15803D' }]}>Nạp tiền vào ví</Text>
-              </TouchableOpacity>
 
               <NetWorthCard token={token || undefined} refreshKey={refreshKey} />
 
@@ -523,33 +515,97 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
                 <ChevronRight size={18} color="#64748B" />
               </TouchableOpacity>
 
-              {/* Biểu đồ Donut Chart trung tâm */}
-              <View style={styles.chartSection}>
-                <Svg width={300} height={300} viewBox="0 0 300 300">
-                  {/* 1. Mảng Trắng (Ăn uống): 0° đến angles.a1 */}
-                  <Path
-                    d={describeDonutArc(cx, cy, innerR, outerR, 0, Math.max(10, Math.min(350, angles.a1)))}
-                    fill="#FFFFFF"
-                  />
+              {/* Biểu đồ chi tiêu theo ngày từ API /api/reports/daily */}
+              <DailyExpenseChart
+                token={token || undefined}
+                monthStr={`${currentYear}-${String(currentMonthIndex).padStart(2, '0')}`}
+                refreshKey={refreshKey}
+              />
 
-                  {/* 2. Mảng Xanh Biển (Khác): angles.a1 đến 360° */}
-                  <Path
-                    d={describeDonutArc(cx, cy, innerR, outerR, Math.max(10, Math.min(350, angles.a1)), 360)}
-                    fill="#0284C7"
-                  />
+              {/* Card Cơ cấu chi tiêu theo danh mục kết nối API /api/dashboard/breakdown */}
+              <View style={styles.donutCard}>
+                <View style={styles.donutCardHeader}>
+                  <Text style={styles.donutCardTitle}>Cơ cấu chi tiêu danh mục</Text>
+                  <Text style={styles.donutCardSubtitle}>
+                    Tháng {currentMonthIndex} • {breakdownItems.length} danh mục
+                  </Text>
+                </View>
 
-                  {/* Vạch chỉ hướng (Leader lines) */}
-                  <Line x1={200} y1={95} x2={230} y2={95} stroke="#0F172A" strokeWidth={1.5} />
-                  <Line x1={62} y1={100} x2={98} y2={100} stroke="#0F172A" strokeWidth={1.5} />
-                </Svg>
+                <View style={styles.donutChartWrapper}>
+                  <Svg width={260} height={260} viewBox="0 0 260 260">
+                    {donutArcs.length === 0 ? (
+                      <>
+                        <Path
+                          d={describeDonutArc(cx, cy, innerR, outerR, 0, 180)}
+                          fill="#E2E8F0"
+                        />
+                        <Path
+                          d={describeDonutArc(cx, cy, innerR, outerR, 180, 360)}
+                          fill="#E2E8F0"
+                        />
+                      </>
+                    ) : donutArcs.length === 1 ? (
+                      <>
+                        <Path
+                          d={describeDonutArc(cx, cy, innerR, outerR, 0, 180)}
+                          fill={donutArcs[0].color}
+                        />
+                        <Path
+                          d={describeDonutArc(cx, cy, innerR, outerR, 180, 360)}
+                          fill={donutArcs[0].color}
+                        />
+                      </>
+                    ) : (
+                      donutArcs.map((arc, i) => (
+                        <Path
+                          key={arc.categoryId || `arc-${i}`}
+                          d={describeDonutArc(cx, cy, innerR, outerR, arc.startAngle, arc.endAngle)}
+                          fill={arc.color}
+                        />
+                      ))
+                    )}
+                  </Svg>
 
-                {/* Nhãn chữ nổi (Labels) với tỷ lệ phần trăm động */}
-                <Text style={[styles.chartLabel, styles.labelAnUong]}>
-                  Ăn uống ({foodPercent}%)
-                </Text>
-                <Text style={[styles.chartLabel, styles.labelKhac]}>
-                  Khác ({otherPercent}%)
-                </Text>
+                  {/* Tâm vòng tròn Donut */}
+                  <View style={styles.donutCenterInfo}>
+                    <Text style={styles.donutCenterLabel}>Tổng chi</Text>
+                    <Text style={styles.donutCenterAmount} numberOfLines={1}>
+                      {formatCurrency(breakdownTotal)}đ
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Legend danh sách danh mục phân bổ */}
+                <View style={styles.donutLegendList}>
+                  {breakdownItems.length === 0 ? (
+                    <Text style={styles.donutEmptyText}>Chưa có chi tiêu danh mục nào trong tháng này.</Text>
+                  ) : (
+                    breakdownItems.map((item, i) => {
+                      const color = item.color && item.color !== '#6B7280' ? item.color : PALETTE[i % PALETTE.length];
+                      return (
+                        <View key={item.categoryId || `item-${i}`} style={styles.legendRow}>
+                          <View style={styles.legendLeft}>
+                            <View style={[styles.legendDot, { backgroundColor: color }]} />
+                            <Text style={styles.legendName} numberOfLines={1}>
+                              {item.name}
+                            </Text>
+                            <Text style={styles.legendTxCount}>
+                              ({item.transactionCount} gd)
+                            </Text>
+                          </View>
+                          <View style={styles.legendRight}>
+                            <Text style={styles.legendAmount}>
+                              {formatCurrency(item.amount)}đ
+                            </Text>
+                            <Text style={styles.legendPercent}>
+                              {item.percent}%
+                            </Text>
+                          </View>
+                        </View>
+                      );
+                    })
+                  )}
+                </View>
               </View>
             </ScrollView>
           </SafeAreaView>
@@ -700,11 +756,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     marginBottom: 12,
   },
+  mainBalanceHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  accountBadge: {
+    backgroundColor: '#E0F2FE',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  accountBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#0284C7',
+  },
   mainBalanceLabel: {
     fontSize: 13,
     color: '#64748B',
     fontWeight: '500',
-    marginBottom: 4,
   },
   amountRow: {
     flexDirection: 'row',
@@ -785,26 +857,108 @@ const styles = StyleSheet.create({
     color: '#16A34A',
     fontWeight: '800',
   },
-  chartSection: {
+  donutCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 18,
+    marginTop: 14,
+    shadowColor: '#0284C7',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  donutCardHeader: {
+    marginBottom: 8,
+  },
+  donutCardTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  donutCardSubtitle: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  donutChartWrapper: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 16,
     position: 'relative',
-    height: 310,
+    marginVertical: 12,
+    height: 260,
   },
-  chartLabel: {
+  donutCenterInfo: {
     position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 110,
+  },
+  donutCenterLabel: {
     fontSize: 12,
+    color: '#64748B',
+    fontWeight: '600',
+  },
+  donutCenterAmount: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: '#0F172A',
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  donutLegendList: {
+    marginTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    paddingTop: 12,
+    gap: 10,
+  },
+  donutEmptyText: {
+    fontSize: 12,
+    color: '#94A3B8',
+    textAlign: 'center',
+    paddingVertical: 8,
+  },
+  legendRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  legendLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+    marginRight: 12,
+  },
+  legendDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  legendName: {
+    fontSize: 13,
     fontWeight: '700',
-    color: '#000000',
+    color: '#1E293B',
+    flexShrink: 1,
   },
-  labelAnUong: {
-    top: 85,
-    right: 18,
+  legendTxCount: {
+    fontSize: 11,
+    color: '#94A3B8',
   },
-  labelKhac: {
-    top: 145,
-    right: 12,
+  legendRight: {
+    alignItems: 'flex-end',
+  },
+  legendAmount: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  legendPercent: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#0284C7',
+    marginTop: 1,
   },
   bottomNavContainer: {
     position: 'absolute',

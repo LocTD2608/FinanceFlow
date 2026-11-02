@@ -30,10 +30,14 @@ import {
   Bookmark,
   BarChart2,
   Settings,
+  Briefcase,
+  Gift,
+  TrendingUp,
 } from 'lucide-react-native';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useTransactionStore } from '../../store/useTransactionStore';
 import { walletApi } from '../../api/wallet';
+import { categoryApi, CategoryItemData } from '../../api/category';
 
 const { width } = Dimensions.get('window');
 
@@ -52,11 +56,19 @@ interface CategoryItem {
   icon: any;
 }
 
-const CATEGORIES: CategoryItem[] = [
+const EXPENSE_CATEGORIES: CategoryItem[] = [
   { id: 'food', label: 'Ăn uống', icon: Utensils },
   { id: 'shopping', label: 'Mua sắm', icon: ShoppingBag },
   { id: 'transport', label: 'Di chuyển', icon: Car },
   { id: 'entertainment', label: 'Giải trí', icon: Film },
+  { id: 'other', label: 'Khác', icon: MoreHorizontal },
+];
+
+const INCOME_CATEGORIES: CategoryItem[] = [
+  { id: 'salary', label: 'Lương', icon: Briefcase },
+  { id: 'bonus', label: 'Thưởng', icon: Gift },
+  { id: 'investment', label: 'Đầu tư', icon: TrendingUp },
+  { id: 'side_job', label: 'Việc phụ', icon: Wallet },
   { id: 'other', label: 'Khác', icon: MoreHorizontal },
 ];
 
@@ -70,7 +82,8 @@ export default function CashFlowScreen({
   const { createTransaction } = useTransactionStore();
 
   const [mode, setMode] = useState<CashFlowMode>('in');
-  const [selectedCategory, setSelectedCategory] = useState<string>('other');
+  const [selectedCategory, setSelectedCategory] = useState<string>('salary');
+  const [serverCategories, setServerCategories] = useState<CategoryItemData[]>([]);
   const [amountIn, setAmountIn] = useState<string>('500.000');
   const [amountOut, setAmountOut] = useState<string>('500.000');
   const [dateStr, setDateStr] = useState<string>('18/10/2026');
@@ -78,6 +91,51 @@ export default function CashFlowScreen({
   const [noteOut, setNoteOut] = useState<string>('Thanh toán bữa trưa');
   const [hasError, setHasError] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+  // Tải danh mục thực tế từ server theo mode
+  useEffect(() => {
+    const kind = mode === 'in' ? 'income' : 'expense';
+    categoryApi.getCategories(token || undefined, kind).then((res) => {
+      if (res?.success && Array.isArray(res.data)) {
+        setServerCategories(res.data);
+      }
+    });
+  }, [token, mode]);
+
+  // Chuyển chế độ Thêm tiền mặt <-> Trừ tiền mặt
+  const handleSetMode = (newMode: CashFlowMode) => {
+    setMode(newMode);
+    setSelectedCategory(newMode === 'in' ? 'salary' : 'food');
+  };
+
+  const categoriesToDisplay = mode === 'in' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+
+  // Khớp danh mục UI sang categoryId thật trên backend
+  const resolveCategoryId = (): string | undefined => {
+    const isIncome = mode === 'in';
+    const mapping: Record<string, string[]> = isIncome
+      ? {
+          salary: ['Lương'],
+          bonus: ['Thưởng'],
+          investment: ['Đầu tư', 'Kinh doanh'],
+          side_job: ['Công việc phụ', 'Việc phụ'],
+          other: ['Khác (Thu)', 'Khác'],
+        }
+      : {
+          food: ['Ăn uống'],
+          shopping: ['Mua sắm'],
+          transport: ['Đi lại', 'Di chuyển'],
+          entertainment: ['Giải trí'],
+          other: ['Khác (Chi)', 'Khác'],
+        };
+    const names = mapping[selectedCategory] || (isIncome ? ['Khác (Thu)', 'Khác'] : ['Khác (Chi)', 'Khác']);
+    const found = serverCategories.find((c) =>
+      names.some((n) => c.name.toLowerCase().includes(n.toLowerCase()))
+    );
+    if (found) return found._id || found.id;
+    if (serverCategories.length > 0) return serverCategories[0]._id || serverCategories[0].id;
+    return undefined;
+  };
 
   // Animation trượt mượt mà cho nút Toggle (Thêm tiền mặt vs Trừ tiền mặt)
   const toggleAnim = useRef(new Animated.Value(0)).current;
@@ -107,6 +165,12 @@ export default function CashFlowScreen({
       return;
     }
 
+    const resolvedCatId = resolveCategoryId();
+    if (!resolvedCatId) {
+      Alert.alert('Lỗi', 'Không tìm thấy danh mục hợp lệ trên hệ thống. Vui lòng thử lại sau.');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       // Lấy ví tiền mặt của người dùng hoặc dùng fallback mặc định
@@ -117,13 +181,17 @@ export default function CashFlowScreen({
         amount: numericAmount,
         type: mode === 'in' ? 'income' : 'expense',
         walletId,
+        categoryId: resolvedCatId,
         note: currentNote.trim(),
         transactionDate: new Date().toISOString(),
       });
 
       if (result.success) {
         const actionName = mode === 'in' ? 'Thêm tiền mặt' : 'Trừ tiền mặt';
-        const amountVal = mode === 'in' ? `+${numericAmount.toLocaleString('vi-VN')}đ` : `-${numericAmount.toLocaleString('vi-VN')}đ`;
+        const amountVal =
+          mode === 'in'
+            ? `+${numericAmount.toLocaleString('vi-VN')}đ`
+            : `-${numericAmount.toLocaleString('vi-VN')}đ`;
         Alert.alert(
           'Thành công',
           `${actionName} thành công: ${amountVal}\nGhi chú: ${currentNote.trim()}`,
@@ -203,7 +271,7 @@ export default function CashFlowScreen({
 
           <TouchableOpacity
             style={styles.toggleBtn}
-            onPress={() => setMode('in')}
+            onPress={() => handleSetMode('in')}
             activeOpacity={0.8}
           >
             <Text
@@ -218,7 +286,7 @@ export default function CashFlowScreen({
 
           <TouchableOpacity
             style={styles.toggleBtn}
-            onPress={() => setMode('out')}
+            onPress={() => handleSetMode('out')}
             activeOpacity={0.8}
           >
             <Text
@@ -290,7 +358,7 @@ export default function CashFlowScreen({
         <View style={styles.card}>
           <Text style={styles.cardLabel}>Phân bổ vào danh mục *</Text>
           <View style={styles.categoryGrid}>
-            {CATEGORIES.map((item) => {
+            {categoriesToDisplay.map((item) => {
               const IconComp = item.icon;
               const isSelected = selectedCategory === item.id;
               const isFull = item.id === 'other';
