@@ -10,6 +10,7 @@ import {
   Alert,
   StatusBar,
   ActivityIndicator,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -24,8 +25,14 @@ import {
   Bookmark,
   BarChart2,
   Settings,
+  Volume2,
+  Bell,
+  Sparkles,
 } from 'lucide-react-native';
 import { useAuthStore } from '../../store/useAuthStore';
+import { useSettingsStore } from '../../store/useSettingsStore';
+import { soundService } from '../../services/soundService';
+import { dispatchBalanceNotification } from '../../services/socketService';
 
 interface Props {
   onBack?: () => void;
@@ -41,6 +48,20 @@ export default function ProfileScreen({
   hideBottomBar,
 }: Props) {
   const { user, updateProfile, logout } = useAuthStore();
+  const { soundEnabled, setSoundEnabled, toastEnabled, setToastEnabled } = useSettingsStore();
+
+  const handleTestChime = () => {
+    soundService.unlockAudio();
+    soundService.playChime('in');
+    dispatchBalanceNotification({
+      type: 'test',
+      direction: 'in',
+      amount: 500000,
+      walletName: 'Ví tiền mặt',
+      newBalance: 2500000,
+      note: 'Âm thanh Ting Ting thử nghiệm 🔔',
+    });
+  };
 
   const [isEditing, setIsEditing] = useState(false);
   const [fullName, setFullName] = useState(user?.username || 'HOANG NGOC LIEN');
@@ -201,6 +222,65 @@ export default function ProfileScreen({
                 <Text style={styles.propLabel}>Đơn vị tiền tệ</Text>
                 <Text style={styles.propValue}>VND • Việt Nam đồng</Text>
               </View>
+            </View>
+
+                          {/* Thẻ 3: Thông báo & Âm thanh biến động số dư ("Ting Ting") */}
+            <View style={styles.infoCard}>
+              <Text style={styles.cardHeading}>Thông báo & Âm thanh</Text>
+
+              {/* Bật / Tắt âm thanh Ting Ting */}
+              <View style={styles.settingRow}>
+                <View style={styles.settingIconTitle}>
+                  <View style={[styles.settingIconBox, { backgroundColor: '#ECFDF5' }]}>
+                    <Volume2 size={18} color="#10B981" />
+                  </View>
+                  <View style={{ flex: 1, marginRight: 12 }}>
+                    <Text style={styles.settingTitle}>Âm thanh Ting Ting</Text>
+                    <Text style={styles.settingDesc}>
+                      Phát âm thanh ngân chuông khi có biến động số dư
+                    </Text>
+                  </View>
+                </View>
+                <Switch
+                  value={soundEnabled}
+                  onValueChange={setSoundEnabled}
+                  trackColor={{ false: '#E2E8F0', true: '#6EE7B7' }}
+                  thumbColor={soundEnabled ? '#10B981' : '#94A3B8'}
+                />
+              </View>
+
+              <View style={styles.separator} />
+
+              {/* Bật / Tắt Toast thông báo nổi */}
+              <View style={styles.settingRow}>
+                <View style={styles.settingIconTitle}>
+                  <View style={[styles.settingIconBox, { backgroundColor: '#EFF6FF' }]}>
+                    <Bell size={18} color="#2563EB" />
+                  </View>
+                  <View style={{ flex: 1, marginRight: 12 }}>
+                    <Text style={styles.settingTitle}>Biểu ngữ nổi màn hình</Text>
+                    <Text style={styles.settingDesc}>
+                      Hiển thị thanh trượt biến động số dư tức thời
+                    </Text>
+                  </View>
+                </View>
+                <Switch
+                  value={toastEnabled}
+                  onValueChange={setToastEnabled}
+                  trackColor={{ false: '#E2E8F0', true: '#93C5FD' }}
+                  thumbColor={toastEnabled ? '#2563EB' : '#94A3B8'}
+                />
+              </View>
+
+              {/* Nút Nghe thử âm thanh Ting Ting */}
+              <TouchableOpacity
+                style={styles.testChimeBtn}
+                onPress={handleTestChime}
+                activeOpacity={0.8}
+              >
+                <Sparkles size={16} color="#059669" />
+                <Text style={styles.testChimeBtnText}>Nghe thử chuông Ting Ting 🔔</Text>
+              </TouchableOpacity>
             </View>
 
               {/* Nút Đăng xuất */}
@@ -691,5 +771,57 @@ const styles = StyleSheet.create({
   navLabelActive: {
     color: '#0284C7',
     fontWeight: '800',
+  },
+  settingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+  },
+  settingIconTitle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  settingIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  settingTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  settingDesc: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
+    lineHeight: 15,
+  },
+  separator: {
+    height: 1,
+    backgroundColor: '#F1F5F9',
+    marginVertical: 4,
+  },
+  testChimeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    paddingVertical: 12,
+    borderRadius: 14,
+    marginTop: 12,
+    gap: 8,
+  },
+  testChimeBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#059669',
   },
 });

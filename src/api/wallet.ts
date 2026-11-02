@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE_URL as ROOT_API_URL } from './config';
+import { dispatchBalanceNotification } from '../services/socketService';
 
 export interface WalletItem {
   _id: string;
@@ -248,6 +249,15 @@ export const walletApi = {
       if (!wallet) return { success: false, message: 'Không tìm thấy ví.' };
       wallet.balance += amount;
       await saveLocalWallets(wallets);
+
+      dispatchBalanceNotification({
+        type: 'income',
+        direction: 'in',
+        amount,
+        walletName: wallet.name,
+        newBalance: wallet.balance,
+        note: input.note || 'Nạp tiền vào ví',
+      });
 
       const tx = {
         _id: `tx_${Date.now()}`,

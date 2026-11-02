@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE_URL as ROOT_API_URL } from './config';
+import { dispatchBalanceNotification } from '../services/socketService';
 
 export type TransactionType = 'expense' | 'income' | 'transfer';
 
@@ -146,12 +147,36 @@ export const transactionApi = {
       if (sourceWallet) {
         if (input.type === 'expense') {
           sourceWallet.balance -= input.amount;
+          dispatchBalanceNotification({
+            type: 'expense',
+            direction: 'out',
+            amount: input.amount,
+            walletName: sourceWallet.name,
+            newBalance: sourceWallet.balance,
+            note: input.note || 'Chi tiêu',
+          });
         } else if (input.type === 'income') {
           sourceWallet.balance += input.amount;
+          dispatchBalanceNotification({
+            type: 'income',
+            direction: 'in',
+            amount: input.amount,
+            walletName: sourceWallet.name,
+            newBalance: sourceWallet.balance,
+            note: input.note || 'Thu nhập',
+          });
         } else if (input.type === 'transfer' && input.destinationWalletId) {
           sourceWallet.balance -= input.amount;
           const destWallet = wallets.find((w: { id: string }) => w.id === input.destinationWalletId);
           if (destWallet) destWallet.balance += input.amount;
+          dispatchBalanceNotification({
+            type: 'transfer',
+            direction: 'out',
+            amount: input.amount,
+            walletName: sourceWallet.name,
+            newBalance: sourceWallet.balance,
+            note: input.note || 'Chuyển tiền',
+          });
         }
       }
       await AsyncStorage.setItem(LOCAL_WALLETS_KEY, JSON.stringify(wallets));

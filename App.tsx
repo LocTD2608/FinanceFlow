@@ -8,6 +8,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuthStore } from './src/store/useAuthStore';
 import { useSettingsStore } from './src/store/useSettingsStore';
 import { soundService } from './src/services/soundService';
+import { initSocketConnection, disconnectSocket } from './src/services/socketService';
 import WelcomeScreen from './src/screens/auth/WelcomeScreen';
 import LoginScreen from './src/screens/auth/LoginScreen';
 import RegisterScreen from './src/screens/auth/RegisterScreen';
@@ -34,6 +35,18 @@ export default function App() {
   useEffect(() => {
     soundService.unlockAudio();
   }, []);
+
+  // Kết nối Socket.io lắng nghe thông báo biến động số dư thời gian thực
+  useEffect(() => {
+    if (token) {
+      initSocketConnection(token);
+    } else {
+      disconnectSocket();
+    }
+    return () => {
+      disconnectSocket();
+    };
+  }, [token]);
 
   // Đăng ký nhận thông báo nhắc hóa đơn khi đã đăng nhập (chỉ thiết bị thật)
   useEffect(() => {
