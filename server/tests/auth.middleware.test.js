@@ -11,28 +11,28 @@ const mockRes = () => {
 };
 
 describe('auth middleware', () => {
-  it('thiếu header Authorization -> 401', () => {
+  it('thiếu header Authorization -> 401', async () => {
     const res = mockRes();
     const next = jest.fn();
-    auth({ headers: {} }, res, next);
+    await auth({ headers: {} }, res, next);
     expect(res.status).toHaveBeenCalledWith(401);
     expect(next).not.toHaveBeenCalled();
   });
 
-  it('token sai -> 401', () => {
+  it('token sai -> 401', async () => {
     const res = mockRes();
     const next = jest.fn();
-    auth({ headers: { authorization: 'Bearer abc.def.ghi' } }, res, next);
+    await auth({ headers: { authorization: 'Bearer abc.def.ghi' } }, res, next);
     expect(res.status).toHaveBeenCalledWith(401);
     expect(next).not.toHaveBeenCalled();
   });
 
-  it('token hợp lệ -> gắn req.user và gọi next', () => {
+  it('token hợp lệ -> gắn req.user và gọi next', async () => {
     const token = jwt.sign({ id: 'u1', email: 'a@b.c' }, SECRET, { expiresIn: '1h' });
     const req = { headers: { authorization: `Bearer ${token}` } };
     const next = jest.fn();
-    auth(req, mockRes(), next);
-    expect(req.user).toEqual({ id: 'u1', email: 'a@b.c' });
+    await auth(req, mockRes(), next);
+    expect(req.user).toEqual({ id: 'u1', email: 'a@b.c', role: 'user', status: 'active' });
     expect(next).toHaveBeenCalled();
   });
 });
