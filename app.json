@@ -22,7 +22,19 @@
     },
     "plugins": [
       "expo-asset",
-      "expo-status-bar"
+      "expo-status-bar",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Cho phép FinanceFlow truy cập Camera để quét mã QR thanh toán."
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Cho phép FinanceFlow sử dụng Face ID để xác thực chuyển tiền nhanh chóng."
+        }
+      ]
     ]
   }
 }
