@@ -13,6 +13,7 @@ const budgetRoutes = require('./routes/budget.routes');
 const paymentRoutes = require('./routes/payment.routes');
 const netWorthRoutes = require('./routes/netWorth.routes');
 const billReminderRoutes = require('./routes/billReminder.routes');
+const adminRoutes = require('./routes/admin.routes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -50,6 +51,9 @@ app.use('/api/networth', netWorthRoutes);
 
 // 9. Nhắc hóa đơn định kỳ
 app.use('/api/bill-reminders', billReminderRoutes);
+
+// 10. Quản trị hệ thống & Phân quyền (RBAC - Yêu cầu role: admin)
+app.use('/api/admin', adminRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
