@@ -13,6 +13,9 @@ const budgetRoutes = require('./routes/budget.routes');
 const paymentRoutes = require('./routes/payment.routes');
 const netWorthRoutes = require('./routes/netWorth.routes');
 const billReminderRoutes = require('./routes/billReminder.routes');
+const p2pRoutes = require('./routes/p2p.routes');
+const reportRoutes = require('./routes/report.routes');
+const goalRoutes = require('./routes/goal.routes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -50,6 +53,15 @@ app.use('/api/networth', netWorthRoutes);
 
 // 9. Nhắc hóa đơn định kỳ
 app.use('/api/bill-reminders', billReminderRoutes);
+
+// 10. Chuyển tiền nội bộ P2P
+app.use('/api/p2p', p2pRoutes);
+
+// 11. Báo cáo tài chính & Biểu đồ
+app.use('/api/reports', reportRoutes);
+
+// 12. Quản lý mục tiêu tài chính (Tiết kiệm)
+app.use('/api/goals', goalRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
