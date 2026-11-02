@@ -19,9 +19,24 @@ const getDemoData = async (categoryMap) => {
     nickname: 'Nguyễn Demo',
     username: 'Nguyễn Demo',
     phone: '0901234567',
+    role: 'user',
+    status: 'active',
     baseCurrency: 'VND',
     startOfWeek: 'monday',
     salaryDay: 5,
+    theme: 'dark',
+  };
+
+  const adminPasswordHash = await bcrypt.hash('admin123', 10);
+  const admin = {
+    email: 'admin@financeflow.vn',
+    passwordHash: adminPasswordHash,
+    nickname: 'Admin',
+    username: 'Admin FinanceFlow',
+    phone: '0988888888',
+    role: 'admin',
+    status: 'active',
+    baseCurrency: 'VND',
     theme: 'dark',
   };
 
@@ -97,6 +112,7 @@ const getDemoData = async (categoryMap) => {
 
   return {
     user,
+    admin,
     wallets,
     transactions: transactions.map(t => ({
       ...t,

@@ -64,7 +64,7 @@ async function seedDemoData(categoryMap) {
     ]);
   }
 
-  const { user, wallets, transactions, budgets, billReminders, netWorthSnapshot } = await getDemoData(categoryMap);
+  const { user, admin, wallets, transactions, budgets, billReminders, netWorthSnapshot } = await getDemoData(categoryMap);
 
   // 1. Tạo user demo
   const createdUser = await User.create(user);
@@ -76,16 +76,8 @@ async function seedDemoData(categoryMap) {
   if (existingAdmin) {
     await User.deleteOne({ _id: existingAdmin._id });
   }
-  const bcrypt = require('bcryptjs');
-  const adminPasswordHash = await bcrypt.hash('admin123', 10);
-  await User.create({
-    email: 'admin@financeflow.vn',
-    passwordHash: adminPasswordHash,
-    username: 'Admin FinanceFlow',
-    nickname: 'Admin',
-    phone: '0988888888',
-  });
-  log.success('Đã tạo user admin: admin@financeflow.vn (Mật khẩu: admin123)');
+  const createdAdmin = await User.create(admin);
+  log.success(`Đã tạo user admin: ${createdAdmin.email} [role: ${createdAdmin.role}] (Mật khẩu: admin123)`);
 
   // 2. Tạo wallets
   const walletDocs = await Wallet.insertMany(wallets.map(w => ({ ...w, userId })));
