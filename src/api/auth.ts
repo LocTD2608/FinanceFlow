@@ -6,6 +6,8 @@ export interface User {
   username: string;
   phone?: string;
   email: string;
+  role?: 'user' | 'admin';
+  status?: 'active' | 'locked';
   authProvider?: 'local' | 'google' | 'apple' | 'facebook';
   avatar?: string | null;
 }
@@ -27,7 +29,7 @@ export interface AuthResponse {
 }
 
 const API_BASE_URL = `${ROOT_API_URL}/auth`;
-const LOCAL_USERS_KEY = '@financeflow_local_users';
+export const LOCAL_USERS_KEY = '@financeflow_local_users';
 
 export const authApi = {
   async register(username: string, phone: string, email: string, password: string): Promise<AuthResponse> {
@@ -50,13 +52,22 @@ export const authApi = {
       if (users.find(u => u.email === email || u.phone === phone)) {
         return { success: false, message: 'Email hoặc số điện thoại đã tồn tại.' };
       }
-      const newUser = { id: `u_${Date.now()}`, username, phone, email, password, authProvider: 'local' as const };
+      const newUser: User & { password: string } = {
+        id: `u_${Date.now()}`,
+        username,
+        phone,
+        email,
+        password,
+        role: 'user',
+        status: 'active',
+        authProvider: 'local' as const,
+      };
       users.push(newUser);
       await AsyncStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(users));
       return {
         success: true,
         message: 'Đăng ký thành công!',
-        user: { id: newUser.id, username, phone, email, authProvider: 'local' },
+        user: { id: newUser.id, username, phone, email, role: 'user', status: 'active', authProvider: 'local' },
         token: `mock_jwt_token_${newUser.id}`,
       };
     }
@@ -90,6 +101,8 @@ export const authApi = {
           phone: '0988888888',
           email: 'admin@financeflow.vn',
           password,
+          role: 'admin',
+          status: 'active',
           authProvider: 'local',
         };
       } else if (!user && (idLower === 'demo@financeflow.vn' || idLower === 'demo' || idLower === '0901234567')) {
@@ -99,6 +112,19 @@ export const authApi = {
           phone: '0901234567',
           email: 'demo@financeflow.vn',
           password,
+          role: 'user',
+          status: 'active',
+          authProvider: 'local',
+        };
+      } else if (!user && (idLower === 'locked@financeflow.vn' || idLower === 'locked')) {
+        user = {
+          id: 'u_locked_777',
+          username: 'Tài Khoản Bị Khóa',
+          phone: '0911222333',
+          email: 'locked@financeflow.vn',
+          password,
+          role: 'user',
+          status: 'locked',
           authProvider: 'local',
         };
       }
@@ -106,10 +132,26 @@ export const authApi = {
       if (!user) {
         return { success: false, message: 'Tài khoản hoặc mật khẩu không chính xác.' };
       }
+
+      if (user.status === 'locked') {
+        return {
+          success: false,
+          message: 'Tài khoản của bạn đã bị khóa bởi Quản trị viên. Vui lòng liên hệ hỗ trợ.',
+        };
+      }
+
       return {
         success: true,
         message: 'Đăng nhập thành công!',
-        user: { id: user.id, username: user.username, phone: user.phone, email: user.email, authProvider: user.authProvider || 'local' },
+        user: {
+          id: user.id,
+          username: user.username,
+          phone: user.phone,
+          email: user.email,
+          authProvider: user.authProvider || 'local',
+          role: user.role || 'user',
+          status: user.status || 'active',
+        },
         token: `mock_jwt_token_${user.id}`,
       };
     }
@@ -139,12 +181,22 @@ export const authApi = {
           username: payload.username,
           phone: '',
           email: payload.email,
+          role: 'user',
+          status: 'active',
           authProvider: payload.provider,
           avatar: payload.avatar || null,
         };
         users.push(user);
         await AsyncStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(users));
       }
+
+      if (user.status === 'locked') {
+        return {
+          success: false,
+          message: 'Tài khoản của bạn đã bị khóa bởi Quản trị viên. Vui lòng liên hệ hỗ trợ.',
+        };
+      }
+
       return {
         success: true,
         message: `Đăng nhập ${payload.provider.toUpperCase()} thành công!`,
@@ -155,6 +207,8 @@ export const authApi = {
           email: user.email,
           authProvider: payload.provider,
           avatar: user.avatar,
+          role: user.role || 'user',
+          status: user.status || 'active',
         },
         token: `mock_social_jwt_${user.id}`,
       };
@@ -200,6 +254,8 @@ export const authApi = {
           email: data.email || 'user@financeflow.vn',
           phone: data.phone || '',
           avatar: data.avatar || null,
+          role: 'user',
+          status: 'active',
           authProvider: 'local',
         };
         newUsers.push(updatedUser);

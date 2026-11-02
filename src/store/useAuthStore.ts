@@ -6,7 +6,9 @@ interface AuthState {
   user: User | null;
   token: string | null;
   isLoading: boolean;
+  activeMode: 'admin' | 'user';
   setUser: (user: User | null, token: string | null) => Promise<void>;
+  setActiveMode: (mode: 'admin' | 'user') => void;
   updateProfile: (data: Partial<User>) => Promise<{ success: boolean; message: string }>;
   logout: () => Promise<void>;
   loadSession: () => Promise<void>;
@@ -18,6 +20,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   token: null,
   isLoading: true,
+  activeMode: 'user',
 
   setUser: async (user, token) => {
     if (user && token) {
@@ -25,7 +28,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } else {
       await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
     }
-    set({ user, token });
+    const activeMode = user?.role === 'admin' ? 'admin' : 'user';
+    set({ user, token, activeMode });
+  },
+
+  setActiveMode: (mode: 'admin' | 'user') => {
+    set({ activeMode: mode });
   },
 
   updateProfile: async (data: Partial<User>) => {
@@ -49,7 +57,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   logout: async () => {
     await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
-    set({ user: null, token: null });
+    set({ user: null, token: null, activeMode: 'user' });
   },
 
   loadSession: async () => {
@@ -57,12 +65,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const raw = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
       if (raw) {
         const { user, token } = JSON.parse(raw);
-        set({ user, token, isLoading: false });
+        const activeMode = user?.role === 'admin' ? 'admin' : 'user';
+        set({ user, token, activeMode, isLoading: false });
         return;
       }
     } catch {
       // ignore error
     }
-    set({ isLoading: false });
+    set({ isLoading: false, activeMode: 'user' });
   },
 }));
