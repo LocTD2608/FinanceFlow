@@ -26,7 +26,7 @@ const QUICK_AMOUNTS = [
   { label: '+50k', value: 50000 },
   { label: '+100k', value: 100000 },
   { label: '+200k', value: 200000 },
-  { label: '+500k', value: 50000 },
+  { label: '+500k', value: 500000 },
 ];
 
 export default function DynamicQRModal({
