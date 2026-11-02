@@ -17,6 +17,7 @@ const DEFAULT_CATEGORIES = [
   { name: 'Thời trang',       type: 'expense', icon: 'shirt',          color: '#F43F5E', isDefault: true },
   { name: 'Gia đình & Con cái', type: 'expense', icon: 'baby',         color: '#FB923C', isDefault: true },
   { name: 'Thú cưng',         type: 'expense', icon: 'paw-print',      color: '#A78BFA', isDefault: true },
+  { name: 'Tiết kiệm',        type: 'expense', icon: 'piggy-bank',      color: '#10B981', isDefault: true },
   { name: 'Khác (Chi)',       type: 'expense', icon: 'circle-ellipsis', color: '#6B7280', isDefault: true },
 
   // ===== THU =====
