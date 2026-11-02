@@ -242,6 +242,10 @@ exports.update = async (req, res) => {
       return fail(res, 404, 'Không tìm thấy giao dịch.');
     }
 
+    if (['p2p_out', 'p2p_in'].includes(transaction.type) || transaction.source === 'goal') {
+      return fail(res, 400, 'Không thể chỉnh sửa giao dịch P2P hoặc giao dịch gắn liền với mục tiêu tài chính.');
+    }
+
     const {
       amount,
       type,
@@ -353,6 +357,10 @@ exports.remove = async (req, res) => {
     const transaction = await Transaction.findOne({ _id: id, userId });
     if (!transaction) {
       return fail(res, 404, 'Không tìm thấy giao dịch.');
+    }
+
+    if (['p2p_out', 'p2p_in'].includes(transaction.type) || transaction.source === 'goal') {
+      return fail(res, 400, 'Không thể xóa giao dịch P2P hoặc giao dịch gắn liền với mục tiêu tài chính.');
     }
 
     // Hoàn tác lại số dư (không để ví thường âm)

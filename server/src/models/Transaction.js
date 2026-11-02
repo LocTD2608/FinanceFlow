@@ -16,13 +16,37 @@ const transactionSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Category',
       required: function () {
-        return this.type !== 'transfer';
+        return this.type !== 'transfer' && this.type !== 'p2p_out' && this.type !== 'p2p_in';
       },
     },
     // Chỉ có giá trị khi type === 'transfer'
     destinationWalletId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Wallet',
+      default: null,
+    },
+    // Người dùng đối tác trong giao dịch P2P
+    counterpartyUserId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    // Gom các bút toán liên quan (ví dụ P2P, Goal)
+    groupId: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    // Nguồn gốc phát sinh giao dịch
+    source: {
+      type: String,
+      enum: ['manual', 'p2p', 'goal'],
+      default: 'manual',
+    },
+    // Liên kết với mục tiêu tài chính nếu source === 'goal'
+    goalId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Goal',
       default: null,
     },
     amount: {
@@ -32,7 +56,7 @@ const transactionSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ['expense', 'income', 'transfer'],
+      enum: ['expense', 'income', 'transfer', 'p2p_out', 'p2p_in'],
       required: true,
     },
     transactionDate: {
@@ -65,6 +89,7 @@ const transactionSchema = new mongoose.Schema(
 transactionSchema.index({ userId: 1, transactionDate: -1 }); // Hiển thị giao dịch gần nhất
 transactionSchema.index({ userId: 1, categoryId: 1, transactionDate: -1 }); // Tính ngân sách & biểu đồ
 transactionSchema.index({ userId: 1, amount: -1 }); // Top khoản chi lớn nhất
+transactionSchema.index({ groupId: 1 }, { sparse: true });
 transactionSchema.index(
   { userId: 1, idempotencyKey: 1 },
   { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } }

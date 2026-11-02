@@ -10,10 +10,18 @@ const connectDB = async () => {
   const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/financeflow_dev';
 
   try {
-    await mongoose.connect(uri);
+    await mongoose.connect(uri, {
+      serverSelectionTimeoutMS: 5000,
+      autoIndex: process.env.NODE_ENV !== 'production',
+    });
     console.log(`✅ Kết nối MongoDB thành công! DB: ${mongoose.connection.name}`);
   } catch (error) {
     console.error('❌ Kết nối MongoDB thất bại:', error.message);
+    if (error.message.includes('bad auth') || error.message.includes('Authentication failed')) {
+      console.error('👉 Gợi ý: Vui lòng kiểm tra lại username và password trong chuỗi MONGODB_URI.');
+    } else if (error.message.includes('querySrv ENOTFOUND') || error.message.includes('ETIMEDOUT') || error.message.includes('whitelisted')) {
+      console.error('👉 Gợi ý: Vui lòng kiểm tra IP Access List trên MongoDB Atlas (Network Access).');
+    }
     process.exit(1); // Dừng server nếu không kết nối được DB
   }
 };
