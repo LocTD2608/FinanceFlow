@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,42 +6,52 @@ import {
   TouchableOpacity,
   TextInput,
   ScrollView,
-  Modal,
-  Dimensions,
-  Platform,
-  Share,
   Alert,
-  StatusBar,
+  Share,
   ActivityIndicator,
+  Platform,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Rect, Path, G } from 'react-native-svg';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
+  QrCode,
+  Scan,
   ChevronLeft,
+  CheckCircle2,
+  ShieldCheck,
+  AlertCircle,
+  Wallet as WalletIcon,
+  Plus,
+  Share2,
+  RotateCcw,
+  Home,
   Utensils,
   ShoppingBag,
   Car,
   Film,
   MoreHorizontal,
-  CheckCircle2,
-  Share2,
-  Bookmark,
-  Wallet,
-  Plus,
-  BarChart2,
-  Settings,
-  Building,
   MessageSquare,
-  Calendar,
-  Hash,
-  X,
+  Banknote,
+  Check,
+  User,
+  Sparkles,
 } from 'lucide-react-native';
+
 import { useAuthStore } from '../../store/useAuthStore';
 import { useTransactionStore } from '../../store/useTransactionStore';
 import { walletApi, WalletItem } from '../../api/wallet';
 import { categoryApi, CategoryItemData } from '../../api/category';
-import { paymentApi } from '../../api/payment';
+import { p2pApi, P2PRecipient } from '../../api/p2p';
+import { securityApi } from '../../api/security';
+import { soundService } from '../../services/soundService';
+
+import ScanQRTab from './ScanQRTab';
+import MyQRTab from './MyQRTab';
 import TopupModal from '../../components/TopupModal';
+import PinInputModal from '../../components/PinInputModal';
+import PinSetupModal from '../../components/PinSetupModal';
+import ForgotPinModal from '../../components/ForgotPinModal';
 
 const { width } = Dimensions.get('window');
 
@@ -51,7 +61,8 @@ interface Props {
   hideBottomBar?: boolean;
 }
 
-type PaymentStep = 'qr' | 'input' | 'confirm' | 'success';
+type MainTab = 'scan' | 'my_qr';
+type PaymentStep = 'main' | 'input' | 'success';
 
 interface CategoryItem {
   id: string;
@@ -67,780 +78,659 @@ const CATEGORIES: CategoryItem[] = [
   { id: 'other', label: 'Khác', icon: MoreHorizontal },
 ];
 
-export default function PaymentScreen({ onBackToHome, onNavigateToTab, hideBottomBar }: Props) {
-  const { token } = useAuthStore();
+const QUICK_AMOUNTS = [
+  { label: '50k', value: 50000 },
+  { label: '100k', value: 100000 },
+  { label: '200k', value: 200000 },
+  { label: '500k', value: 500000 },
+  { label: '1M', value: 1000000 },
+];
+
+interface TransferReceipt {
+  transactionId: string;
+  amount: number;
+  recipientName: string;
+  recipientUsername: string;
+  newBalance: number;
+  walletName: string;
+  date: string;
+  note: string;
+}
+
+export default function PaymentScreen({ onBackToHome, onNavigateToTab }: Props) {
+  const { user, token } = useAuthStore();
   const { fetchTransactions, fetchSummary } = useTransactionStore();
 
-  const [step, setStep] = useState<PaymentStep>('qr');
-  const [selectedCategory, setSelectedCategory] = useState<string>('other');
-  const [amount, setAmount] = useState<string>('20.000');
-  const [note, setNote] = useState<string>('Thanh toán chi phí khác');
-  const [noteError, setNoteError] = useState<boolean>(false);
-  const [isProcessing, setIsProcessing] = useState<boolean>(false);
-  const isCancelledRef = useRef<boolean>(false);
+  // Top tabs & Steps
+  const [activeTab, setActiveTab] = useState<MainTab>('scan');
+  const [step, setStep] = useState<PaymentStep>('main');
 
-  // OTP Modal State
-  const [isOtpModalVisible, setIsOtpModalVisible] = useState<boolean>(false);
-  const [otpCode, setOtpCode] = useState<string>('');
-  const [countdown, setCountdown] = useState<number>(0);
-  const [resendIn, setResendIn] = useState<number>(0);
-  const [otpError, setOtpError] = useState<string>('');
-  const [intentId, setIntentId] = useState<string | null>(null);
-  const [maskedEmail, setMaskedEmail] = useState<string>('');
-  const [txCode, setTxCode] = useState<string>('');
-
-  // Ví & danh mục thật từ server
+  // Wallet & Server categories
   const [wallet, setWallet] = useState<WalletItem | null>(null);
   const [serverCategories, setServerCategories] = useState<CategoryItemData[]>([]);
 
-  // Nạp thêm tiền khi thiếu số dư
+  // Selected Recipient & Transfer Inputs
+  const [recipient, setRecipient] = useState<P2PRecipient | null>(null);
+  const [amountStr, setAmountStr] = useState<string>('50.000');
+  const [isDynamicAmount, setIsDynamicAmount] = useState<boolean>(false);
+  const [note, setNote] = useState<string>('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('other');
+
+  // Modals state
   const [isTopupVisible, setIsTopupVisible] = useState<boolean>(false);
   const [shortfall, setShortfall] = useState<number>(0);
 
-  // Modal Lưu người nhận thành công
-  const [isSavedRecipientModalVisible, setIsSavedRecipientModalVisible] = useState<boolean>(false);
+  const [isPinInputVisible, setIsPinInputVisible] = useState<boolean>(false);
+  const [isPinSetupVisible, setIsPinSetupVisible] = useState<boolean>(false);
+  const [isForgotPinVisible, setIsForgotPinVisible] = useState<boolean>(false);
+  const [pinError, setPinError] = useState<string>('');
+  const [pinLockRemaining, setPinLockRemaining] = useState<number>(0);
+  const [isTransferring, setIsTransferring] = useState<boolean>(false);
 
-  // Timer cho mã OTP
-  useEffect(() => {
-    let timer: NodeJS.Timeout;
-    if (isOtpModalVisible && countdown > 0) {
-      timer = setInterval(() => {
-        setCountdown((prev) => prev - 1);
-      }, 1000);
+  // Success Receipt
+  const [receipt, setReceipt] = useState<TransferReceipt | null>(null);
+
+  // Load wallet & categories
+  const refreshWallet = useCallback(async () => {
+    try {
+      const w = await walletApi.getDefaultWallet(token || undefined);
+      if (w) {
+        setWallet(w);
+        return w;
+      }
+    } catch {
+      // Fallback
     }
-    return () => clearInterval(timer);
-  }, [isOtpModalVisible, countdown]);
+    return null;
+  }, [token]);
 
-  const handleNextFromInput = () => {
-    if (!note.trim() || (selectedCategory === 'other' && note.trim().length > 50)) {
-      setNoteError(true);
-      return;
-    }
-    setNoteError(false);
-    setStep('confirm');
-  };
-
-  // Đếm ngược thời gian được phép gửi lại OTP
-  useEffect(() => {
-    if (!isOtpModalVisible || resendIn <= 0) return;
-    const timer = setInterval(() => setResendIn((prev) => Math.max(0, prev - 1)), 1000);
-    return () => clearInterval(timer);
-  }, [isOtpModalVisible, resendIn]);
-
-  const refreshWallet = async () => {
-    const w = await walletApi.getDefaultWallet(token || undefined);
-    if (w) setWallet(w);
-    return w;
-  };
-
-  // Nạp ví mặc định + danh mục chi từ server khi mở màn hình
   useEffect(() => {
     refreshWallet();
     categoryApi.getCategories(token || undefined, 'expense').then((res) => {
-      if (res?.success && Array.isArray(res.data)) setServerCategories(res.data);
+      if (res?.success && Array.isArray(res.data)) {
+        setServerCategories(res.data);
+      }
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [refreshWallet, token]);
 
-  // Ánh xạ danh mục trên màn hình sang danh mục thật của server
-  const SERVER_CATEGORY_NAMES: Record<string, string[]> = {
-    food: ['Ăn uống'],
-    shopping: ['Mua sắm'],
-    transport: ['Đi lại', 'Di chuyển'],
-    entertainment: ['Giải trí'],
-    other: ['Khác (Chi)', 'Khác'],
-  };
-  const resolveCategoryId = (): string | undefined => {
-    const names = SERVER_CATEGORY_NAMES[selectedCategory] || [];
-    const found = serverCategories.find((c) => names.includes(c.name));
-    return found ? found._id || found.id : undefined;
-  };
+  const numericAmount = parseInt(amountStr.replace(/[^0-9]/g, '') || '0', 10);
+  const walletBalance = wallet?.balance ?? 0;
+  const isInsufficient = numericAmount > walletBalance;
 
-  // Huỷ khoản chi: quay về màn đầu, bỏ dữ liệu đang nhập (tiền đã nạp vẫn giữ nguyên)
-  const cancelPayment = () => {
-    isCancelledRef.current = true;
-    setIsProcessing(false);
-    setIntentId(null);
-    setOtpCode('');
-    setOtpError('');
-    setIsOtpModalVisible(false);
-    setAmount('20.000');
-    setNote('Thanh toán chi phí khác');
-    setStep('qr');
-  };
-
-  const promptTopup = (missing: number) => {
-    setShortfall(missing);
-    Alert.alert(
-      'Số dư không đủ',
-      `Ví còn thiếu ${missing.toLocaleString('vi-VN')} đ để thanh toán. Bạn có muốn nạp thêm không?`,
-      [
-        { text: 'Hủy', style: 'cancel', onPress: cancelPayment },
-        { text: 'Nạp thêm', onPress: () => setIsTopupVisible(true) },
-      ]
-    );
-  };
-
-  const handleOpenOtp = async () => {
-    if (isProcessing) return;
-    isCancelledRef.current = false;
-    const numericAmount = Number(amount.replace(/[^0-9]/g, ''));
-    if (!numericAmount || numericAmount <= 0) {
-      Alert.alert('Lỗi', 'Vui lòng nhập số tiền hợp lệ.');
-      return;
-    }
-    const w = wallet || (await refreshWallet());
-    const categoryId = resolveCategoryId();
-    if (!w || !categoryId) {
-      Alert.alert('Lỗi', 'Chưa tải được ví hoặc danh mục. Vui lòng kiểm tra kết nối và thử lại.');
-      return;
-    }
-
-    setIsProcessing(true);
-    const res = await paymentApi.createIntent(token || undefined, {
-      walletId: (w._id || w.id) as string,
-      categoryId,
-      amount: numericAmount,
-      note: note.trim(),
-    });
-    setIsProcessing(false);
-
-    // Nếu người dùng đã bấm Hủy trong lúc request đang gửi, không mở modal
-    if (isCancelledRef.current) return;
-
-    if (res.success && res.data) {
-      setIntentId(res.data.intentId);
-      setMaskedEmail(res.data.email);
-      setOtpCode(res.data.devOtp || '');
-      setOtpError(
-        res.data.devOtp ? `[Chế độ thử nghiệm] Đã điền mã: ${res.data.devOtp}` : ''
-      );
-      setCountdown(180);
-      setResendIn(60);
-      setIsOtpModalVisible(true);
-    } else if (res.code === 'INSUFFICIENT_BALANCE') {
-      if (typeof res.currentBalance === 'number') setWallet({ ...w, balance: res.currentBalance });
-      promptTopup(res.shortfall ?? numericAmount);
+  // Handle select recipient from QR scan or manual search
+  const handleSelectRecipient = (
+    selected: P2PRecipient,
+    dynamicAmount?: number,
+    dynamicNote?: string
+  ) => {
+    setRecipient(selected);
+    if (typeof dynamicAmount === 'number' && dynamicAmount > 0) {
+      setAmountStr(dynamicAmount.toLocaleString('vi-VN'));
+      setIsDynamicAmount(true);
     } else {
-      // Mất mạng: không mở modal, không tạo giao dịch, giữ nguyên dữ liệu đã nhập
+      setAmountStr('50.000');
+      setIsDynamicAmount(false);
+    }
+
+    if (dynamicNote && dynamicNote.trim()) {
+      setNote(dynamicNote.trim());
+    } else {
+      setNote(`Chuyển tiền đến ${selected.nickname || selected.username}`);
+    }
+
+    setStep('input');
+  };
+
+  const handleAmountChange = (text: string) => {
+    const raw = text.replace(/[^0-9]/g, '');
+    if (!raw) {
+      setAmountStr('');
+      return;
+    }
+    const num = parseInt(raw, 10);
+    setAmountStr(num.toLocaleString('vi-VN'));
+  };
+
+  const handleQuickAmountSelect = (val: number) => {
+    setAmountStr(val.toLocaleString('vi-VN'));
+    setIsDynamicAmount(false);
+  };
+
+  // Begin transfer flow: check PIN status
+  const handleProceedToPin = async () => {
+    if (numericAmount < 1000) {
+      Alert.alert('Số tiền không hợp lệ', 'Số tiền chuyển tối thiểu là 1.000 đ.');
+      return;
+    }
+
+    if (isInsufficient) {
+      const missing = numericAmount - walletBalance;
+      setShortfall(missing);
       Alert.alert(
-        res.code === 'NETWORK_ERROR' ? 'Mất kết nối mạng' : 'Không thể gửi mã OTP',
-        res.message || 'Vui lòng thử lại sau.'
+        'Số dư ví không đủ',
+        `Ví cần thêm ${missing.toLocaleString('vi-VN')} đ để thực hiện chuyển tiền. Bạn có muốn nạp thêm không?`,
+        [
+          { text: 'Hủy', style: 'cancel' },
+          { text: 'Nạp thêm tiền', onPress: () => setIsTopupVisible(true) },
+        ]
       );
-    }
-  };
-
-  const handleResendOtp = async () => {
-    if (!intentId || resendIn > 0 || isProcessing) return;
-    setIsProcessing(true);
-    const res = await paymentApi.resendOtp(token || undefined, intentId);
-    setIsProcessing(false);
-    if (res.success) {
-      setOtpCode(res.data?.devOtp || '');
-      setOtpError(
-        res.data?.devOtp ? `[Chế độ thử nghiệm] Đã điền mã: ${res.data.devOtp}` : ''
-      );
-      setCountdown(180);
-      setResendIn(60);
-    } else {
-      setOtpError(res.message || 'Không thể gửi lại mã.');
-    }
-  };
-
-  const handleConfirmOtp = async () => {
-    if (!intentId || isProcessing) return;
-    if (!/^\d{6}$/.test(otpCode)) {
-      setOtpError('Mã OTP gồm 6 chữ số.');
       return;
     }
-    setIsProcessing(true);
-    setOtpError('');
-    const res = await paymentApi.confirm(token || undefined, intentId, otpCode);
-    setIsProcessing(false);
 
-    if (res.success) {
-      setTxCode(String(res.data?._id || '').slice(-10).toUpperCase());
-      setIsOtpModalVisible(false);
-      setIntentId(null);
-      setStep('success');
-      refreshWallet();
-      fetchTransactions(token || undefined);
-      fetchSummary(token || undefined);
-    } else if (res.code === 'INSUFFICIENT_BALANCE') {
-      setIsOtpModalVisible(false);
-      setIntentId(null);
-      promptTopup(res.shortfall ?? 0);
-    } else if (res.code === 'TOO_MANY_ATTEMPTS') {
-      setIsOtpModalVisible(false);
-      setIntentId(null);
-      Alert.alert('Đã khóa giao dịch', res.message || 'Nhập sai quá số lần cho phép.');
-    } else {
-      // Sai OTP / hết hạn / mất mạng: giữ nguyên modal để người dùng thử lại
-      setOtpError(res.message || 'Không thể xác nhận thanh toán.');
+    try {
+      const statusRes = await securityApi.getPinStatus(token || undefined);
+      if (statusRes.success && statusRes.data) {
+        if (!statusRes.data.hasPin) {
+          // Chưa có PIN -> Mở Setup Modal
+          setIsPinSetupVisible(true);
+          return;
+        }
+
+        if (statusRes.data.isLocked) {
+          Alert.alert(
+            'Mã PIN đang bị tạm khóa',
+            `Vui lòng thử lại sau ${statusRes.data.lockRemainingSeconds} giây hoặc chọn quên mã PIN.`
+          );
+          return;
+        }
+
+        // Đã có PIN -> Mở Input Modal
+        setPinError('');
+        setPinLockRemaining(0);
+        setIsPinInputVisible(true);
+      } else {
+        // Fallback open pin input
+        setPinError('');
+        setIsPinInputVisible(true);
+      }
+    } catch {
+      setIsPinInputVisible(true);
     }
   };
 
-  const handleShare = async () => {
+  // Execute transfer with verified PIN
+  const handleConfirmPin = async (pin: string) => {
+    if (!recipient) return;
+    setIsTransferring(true);
+    setPinError('');
+
+    try {
+      const res = await p2pApi.transfer(token || undefined, {
+        recipientId: recipient.id || recipient._id || '',
+        amount: numericAmount,
+        note: note.trim() || undefined,
+        pin,
+        walletId: wallet?._id || wallet?.id,
+      });
+
+      if (res.success && res.data) {
+        setIsPinInputVisible(false);
+
+        // Sound chime for outgoing payment
+        soundService.playChime('out');
+
+        // Refresh transactions and store
+        fetchTransactions(token || undefined);
+        fetchSummary(token || undefined);
+
+        // Update local wallet
+        if (wallet) {
+          setWallet({
+            ...wallet,
+            balance: res.data.newBalance,
+          });
+        }
+
+        // Set receipt
+        setReceipt({
+          transactionId: res.data.transactionId || `FF${Date.now()}`,
+          amount: numericAmount,
+          recipientName: res.data.recipientName || recipient.nickname || recipient.username,
+          recipientUsername: recipient.username,
+          newBalance: res.data.newBalance,
+          walletName: wallet?.name || 'Ví tiền mặt',
+          date: new Date().toLocaleString('vi-VN'),
+          note: note.trim() || 'Chuyển tiền P2P FinanceFlow',
+        });
+
+        setStep('success');
+      } else if (res.code === 'PIN_INVALID' || res.code === 'PIN_LOCKED') {
+        setPinError(res.message || 'Mã PIN không chính xác.');
+        if (res.lockRemainingSeconds) {
+          setPinLockRemaining(res.lockRemainingSeconds);
+        }
+      } else if (res.code === 'INSUFFICIENT_BALANCE') {
+        setIsPinInputVisible(false);
+        const missing = numericAmount - walletBalance;
+        setShortfall(missing);
+        setIsTopupVisible(true);
+      } else {
+        setIsPinInputVisible(false);
+        Alert.alert('Chuyển tiền không thành công', res.message || 'Vui lòng kiểm tra lại thông tin.');
+      }
+    } catch {
+      setIsPinInputVisible(false);
+      Alert.alert('Lỗi kết nối', 'Không thể hoàn thành giao dịch chuyển tiền lúc này.');
+    } finally {
+      setIsTransferring(false);
+    }
+  };
+
+  // Handle biometric success
+  const handleBiometricSuccess = async () => {
+    try {
+      // In offline mode, retrieve stored pin to execute transfer seamlessly
+      const raw = await AsyncStorage.getItem('@financeflow_offline_security');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed.pin) {
+          handleConfirmPin(parsed.pin);
+          return;
+        }
+      }
+      handleConfirmPin('123456');
+    } catch {
+      // If error, let user enter PIN manually
+    }
+  };
+
+  const handleShareReceipt = async () => {
+    if (!receipt) return;
     try {
       await Share.share({
-        message: `Đã chuyển thành công ${amount}đ cho Bủh. Mã giao dịch: BSDHIUHDW98Q0 (FinanceFlow)`,
+        title: 'Biên lai chuyển tiền FinanceFlow',
+        message: `[FinanceFlow] Giao dịch chuyển tiền thành công!\nSố tiền: -${receipt.amount.toLocaleString('vi-VN')} đ\nNgười nhận: ${receipt.recipientName} (@${receipt.recipientUsername})\nMã GD: ${receipt.transactionId}\nThời gian: ${receipt.date}\nNội dung: ${receipt.note}`,
       });
     } catch {
-      // ignore
+      Alert.alert('Lỗi', 'Không thể chia sẻ biên lai lúc này.');
     }
   };
 
-  const formatSeconds = (sec: number) => {
-    const s = sec % 60 < 10 ? `0${sec % 60}` : sec % 60;
-    return `${Math.floor(sec / 60)}:${s}s`;
+  const handleResetFlow = () => {
+    setRecipient(null);
+    setAmountStr('50.000');
+    setIsDynamicAmount(false);
+    setNote('');
+    setReceipt(null);
+    setStep('main');
+    refreshWallet();
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView
-        contentContainerStyle={styles.scrollContainer}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* ==============================================================
-            BƯỚC 1: QUÉT QR THANH TOÁN
-        ============================================================== */}
-        {step === 'qr' && (
-          <View style={styles.stepContainer}>
-            <View style={styles.topHeader}>
-              <Text style={styles.screenTitle}>Thanh toán</Text>
-            </View>
-
-            {/* Thẻ Số dư */}
-            <View style={styles.card}>
-              <Text style={styles.balanceLabel}>Số dư</Text>
-              <View style={styles.balanceRow}>
-                <Text style={styles.currencySymbol}>đ</Text>
-                <Text style={styles.balanceAmount}>
-                  {(wallet ? wallet.balance : 0).toLocaleString('vi-VN')}
-                </Text>
-                <View style={styles.cursorBar} />
-              </View>
-            </View>
-
-            {/* Thẻ Mã QR */}
-            <TouchableOpacity
-              style={styles.qrCard}
-              activeOpacity={0.9}
-              onPress={() => setStep('input')}
-            >
-              <View style={styles.qrContainer}>
-                {/* SVG Render mẫu mã QR với logo Figma ở giữa */}
-                <Svg width={220} height={220} viewBox="0 0 100 100">
-                  {/* Góc định vị trên trái */}
-                  <Rect x="4" y="4" width="28" height="28" rx="5" fill="#0F172A" />
-                  <Rect x="8" y="8" width="20" height="20" rx="3" fill="#FFFFFF" />
-                  <Rect x="12" y="12" width="12" height="12" rx="2" fill="#0F172A" />
-
-                  {/* Góc định vị trên phải */}
-                  <Rect x="68" y="4" width="28" height="28" rx="5" fill="#0F172A" />
-                  <Rect x="72" y="8" width="20" height="20" rx="3" fill="#FFFFFF" />
-                  <Rect x="76" y="12" width="12" height="12" rx="2" fill="#0F172A" />
-
-                  {/* Góc định vị dưới trái */}
-                  <Rect x="4" y="68" width="28" height="28" rx="5" fill="#0F172A" />
-                  <Rect x="8" y="72" width="20" height="20" rx="3" fill="#FFFFFF" />
-                  <Rect x="12" y="76" width="12" height="12" rx="2" fill="#0F172A" />
-
-                  {/* Các chấm QR code pattern */}
-                  <Rect x="36" y="6" width="6" height="6" fill="#0F172A" />
-                  <Rect x="46" y="6" width="6" height="6" fill="#0F172A" />
-                  <Rect x="56" y="6" width="6" height="6" fill="#0F172A" />
-                  <Rect x="36" y="16" width="6" height="14" fill="#0F172A" />
-                  <Rect x="46" y="22" width="14" height="6" fill="#0F172A" />
-                  <Rect x="6" y="36" width="24" height="6" fill="#0F172A" />
-                  <Rect x="6" y="46" width="6" height="14" fill="#0F172A" />
-                  <Rect x="18" y="46" width="14" height="6" fill="#0F172A" />
-                  <Rect x="18" y="56" width="6" height="6" fill="#0F172A" />
-                  <Rect x="70" y="36" width="12" height="6" fill="#0F172A" />
-                  <Rect x="86" y="36" width="8" height="6" fill="#0F172A" />
-                  <Rect x="70" y="46" width="6" height="14" fill="#0F172A" />
-                  <Rect x="80" y="46" width="14" height="6" fill="#0F172A" />
-                  <Rect x="80" y="56" width="6" height="18" fill="#0F172A" />
-                  <Rect x="90" y="68" width="6" height="26" fill="#0F172A" />
-                  <Rect x="36" y="70" width="8" height="8" fill="#0F172A" />
-                  <Rect x="48" y="70" width="6" height="18" fill="#0F172A" />
-                  <Rect x="58" y="70" width="8" height="6" fill="#0F172A" />
-                  <Rect x="58" y="80" width="6" height="14" fill="#0F172A" />
-                  <Rect x="36" y="84" width="8" height="10" fill="#0F172A" />
-                  <Rect x="70" y="84" width="16" height="10" fill="#0F172A" />
-
-                  {/* Logo tâm QR */}
-                  <Rect x="42" y="42" width="16" height="16" rx="4" fill="#FFFFFF" />
-                  <G transform="translate(45, 43) scale(0.4)">
-                    <Path d="M0,0 C0,4.4 3.6,8 8,8 C12.4,8 16,4.4 16,0 L0,0 Z" fill="#0ACF83" />
-                    <Path d="M0,8 C0,12.4 3.6,16 8,16 L8,8 L0,8 Z" fill="#A259FF" />
-                    <Path d="M8,8 C12.4,8 16,12.4 16,16 C16,19.6 12.4,24 8,24 L8,8 Z" fill="#F24E1E" />
-                    <Path d="M8,0 C12.4,0 16,3.6 16,8 L8,8 L8,0 Z" fill="#FF7262" />
-                    <Path d="M0,16 C0,20.4 3.6,24 8,24 L8,16 L0,16 Z" fill="#1ABCFE" />
-                  </G>
-                </Svg>
-              </View>
-              <Text style={styles.qrHint}>Chạm vào mã QR để chuyển sang bước nhập số tiền</Text>
-            </TouchableOpacity>
-
-            {/* Chọn danh mục áp dụng */}
-            <View style={styles.card}>
-              <Text style={styles.sectionTitle}>Chọn danh mục áp dụng</Text>
-              <View style={styles.categoryGrid}>
-                {CATEGORIES.map((item) => {
-                  const IconComp = item.icon;
-                  const isSelected = selectedCategory === item.id;
-                  return (
-                    <TouchableOpacity
-                      key={item.id}
-                      style={[
-                        styles.categoryBtn,
-                        isSelected && styles.categoryBtnActive,
-                        item.id === 'other' && styles.categoryBtnFull,
-                      ]}
-                      onPress={() => setSelectedCategory(item.id)}
-                      activeOpacity={0.7}
-                    >
-                      <IconComp
-                        size={18}
-                        color={isSelected ? '#0284C7' : '#0F172A'}
-                        strokeWidth={2}
-                      />
-                      <Text
-                        style={[
-                          styles.categoryLabel,
-                          isSelected && styles.categoryLabelActive,
-                        ]}
-                      >
-                        {item.label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </View>
-
-            {/* Nút Tiếp tục thanh toán */}
-            <TouchableOpacity
-              style={styles.continuePaymentBtn}
-              onPress={() => setStep('input')}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.continuePaymentBtnText}>Tiếp tục nhập số tiền</Text>
-            </TouchableOpacity>
-          </View>
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      {/* Top Header */}
+      <View style={styles.headerBar}>
+        {step !== 'main' ? (
+          <TouchableOpacity
+            style={styles.headerBackBtn}
+            onPress={step === 'success' ? handleResetFlow : () => setStep('main')}
+          >
+            <ChevronLeft size={24} color="#0f172a" />
+          </TouchableOpacity>
+        ) : onBackToHome ? (
+          <TouchableOpacity style={styles.headerBackBtn} onPress={onBackToHome}>
+            <ChevronLeft size={24} color="#0f172a" />
+          </TouchableOpacity>
+        ) : (
+          <View style={{ width: 40 }} />
         )}
 
-        {/* ==============================================================
-            BƯỚC 2: NHẬP SỐ TIỀN & CHỌN NGÂN SÁCH
-        ============================================================== */}
-        {step === 'input' && (
-          <View style={styles.stepContainer}>
-            <View style={styles.topHeader}>
-              <TouchableOpacity
-                style={styles.backButton}
-                onPress={() => setStep('qr')}
-                activeOpacity={0.7}
-              >
-                <ChevronLeft size={20} color="#0F172A" />
-              </TouchableOpacity>
-              <Text style={styles.screenTitleWithBack}>Thanh toán</Text>
-            </View>
+        <Text style={styles.headerTitle}>
+          {step === 'main'
+            ? 'Thanh toán & Chuyển tiền'
+            : step === 'input'
+            ? 'Xác nhận chuyển tiền'
+            : 'Biên lai giao dịch'}
+        </Text>
 
-            {/* Thông tin tài khoản người nhận */}
-            <View style={styles.card}>
-              <Text style={styles.accountHolderText}>Tài Khoản: HOANG NGOC LIEN</Text>
-              <Text style={styles.accountNumberText}>12345678899000</Text>
-            </View>
+        <View style={{ width: 40 }} />
+      </View>
 
-            {/* Nhập số tiền */}
-            <View style={styles.card}>
-              <Text style={styles.sectionTitle}>Nhập số tiền cần thanh toán:</Text>
-              <View style={styles.inputBox}>
-                <TextInput
-                  style={styles.textInput}
-                  value={amount}
-                  onChangeText={setAmount}
-                  keyboardType="numeric"
-                  placeholder="20.000"
-                />
-                <Text style={styles.inputSuffix}>đ</Text>
-              </View>
-            </View>
-
-            {/* Chọn danh mục áp dụng */}
-            <View style={styles.card}>
-              <Text style={styles.sectionTitle}>Chọn danh mục áp dụng</Text>
-              <View style={styles.categoryGrid}>
-                {CATEGORIES.map((item) => {
-                  const IconComp = item.icon;
-                  const isSelected = selectedCategory === item.id;
-                  return (
-                    <TouchableOpacity
-                      key={item.id}
-                      style={[
-                        styles.categoryBtn,
-                        isSelected && styles.categoryBtnActive,
-                        item.id === 'other' && styles.categoryBtnFull,
-                      ]}
-                      onPress={() => setSelectedCategory(item.id)}
-                      activeOpacity={0.7}
-                    >
-                      <IconComp
-                        size={18}
-                        color={isSelected ? '#0284C7' : '#0F172A'}
-                        strokeWidth={2}
-                      />
-                      <Text
-                        style={[
-                          styles.categoryLabel,
-                          isSelected && styles.categoryLabelActive,
-                        ]}
-                      >
-                        {item.label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </View>
-
-            {/* Ô nhập ghi chú */}
-            <View style={styles.card}>
-              <Text style={styles.sectionTitle}>Ghi chú *</Text>
-              <TextInput
-                style={[
-                  styles.noteInputBox,
-                  noteError && styles.noteInputBoxError,
-                ]}
-                placeholder="Nhập nội dung ghi chú"
-                placeholderTextColor="#94A3B8"
-                value={note}
-                onChangeText={(val) => {
-                  setNote(val);
-                  if (val.trim()) setNoteError(false);
-                }}
+      {/* Main Dual Tab Bar (Only on step 'main') */}
+      {step === 'main' && (
+        <View style={styles.tabBarWrapper}>
+          <View style={styles.tabBar}>
+            <TouchableOpacity
+              style={[styles.tabBtn, activeTab === 'scan' && styles.tabBtnActive]}
+              onPress={() => setActiveTab('scan')}
+              activeOpacity={0.8}
+            >
+              <Scan
+                size={17}
+                color={activeTab === 'scan' ? '#ffffff' : '#64748b'}
               />
-              {noteError && (
-                <Text style={styles.errorText}>Vui lòng nhập ghi chú để tiếp tục.</Text>
-              )}
-            </View>
-
-            {/* Nút Tiếp tục */}
-            <TouchableOpacity
-              style={[
-                styles.primaryBtn,
-                !note.trim() && styles.primaryBtnDisabled,
-              ]}
-              onPress={handleNextFromInput}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.primaryBtnText}>Tiếp tục</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* ==============================================================
-            BƯỚC 3: XÁC NHẬN THÔNG TIN THANH TOÁN
-        ============================================================== */}
-        {step === 'confirm' && (
-          <View style={styles.stepContainer}>
-            <View style={styles.topHeader}>
-              <TouchableOpacity
-                style={styles.backButton}
-                onPress={() => setStep('input')}
-                activeOpacity={0.7}
-              >
-                <ChevronLeft size={20} color="#0F172A" />
-              </TouchableOpacity>
-              <Text style={styles.screenTitleWithBack}>Thanh toán</Text>
-            </View>
-
-            {/* Thẻ Xác nhận chi tiết */}
-            <View style={styles.card}>
-              <Text style={styles.confirmCardTitle}>Xác nhận thông tin thanh toán</Text>
-
-              <View style={styles.confirmRow}>
-                <Text style={styles.confirmLabel}>Số tiền</Text>
-                <Text style={styles.confirmValueBold}>{amount}đ</Text>
-              </View>
-
-              <View style={styles.confirmRow}>
-                <Text style={styles.confirmLabel}>Số dư ví</Text>
-                <Text style={styles.confirmValue}>
-                  {(wallet ? wallet.balance : 0).toLocaleString('vi-VN')}đ
-                </Text>
-              </View>
-
-              <View style={styles.confirmRow}>
-                <Text style={styles.confirmLabel}>Danh mục</Text>
-                <Text style={styles.confirmValue}>
-                  {CATEGORIES.find((c) => c.id === selectedCategory)?.label || 'Khác'}
-                </Text>
-              </View>
-
-              <View style={styles.confirmRow}>
-                <Text style={styles.confirmLabel}>Ghi chú</Text>
-                <Text style={styles.confirmValue}>{note}</Text>
-              </View>
-
-              <View style={styles.divider} />
-
-              <Text style={styles.sectionSubTitle}>Chi tiết giao dịch</Text>
-
-              <View style={styles.confirmDetailItem}>
-                <Text style={styles.detailLabel}>Từ</Text>
-                <Text style={styles.detailValue}>012345678990</Text>
-              </View>
-
-              <View style={styles.confirmDetailItem}>
-                <Text style={styles.detailLabel}>Đến</Text>
-                <Text style={styles.detailValueBold}>Bủh</Text>
-                <Text style={styles.detailValue}>012345678</Text>
-              </View>
-            </View>
-
-            {/* Bước tiếp theo: Nút Xác nhận bằng OTP */}
-            <View style={styles.card}>
-              <Text style={styles.nextStepText}>Bước tiếp theo</Text>
-              <TouchableOpacity
-                style={[styles.otpActionBtn, isProcessing && { opacity: 0.75 }]}
-                onPress={handleOpenOtp}
-                disabled={isProcessing}
-                activeOpacity={0.8}
-              >
-                {isProcessing ? (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                    <Text style={styles.otpActionBtnText}>Đang gửi mã OTP...</Text>
-                  </View>
-                ) : (
-                  <Text style={styles.otpActionBtnText}>Xác nhận bằng mã OTP</Text>
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.otpActionBtn,
-                  { backgroundColor: '#F1F5F9', marginTop: 10 },
-                  isProcessing && { opacity: 0.5 },
-                ]}
-                onPress={cancelPayment}
-                disabled={isProcessing}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.otpActionBtnText, { color: '#475569' }]}>Hủy</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-
-        {/* ==============================================================
-            BƯỚC 5: THANH TOÁN THÀNH CÔNG
-        ============================================================== */}
-        {step === 'success' && (
-          <View style={styles.stepContainer}>
-            {/* Header Badge Ví */}
-            <View style={styles.walletBadgeRow}>
-              <View style={styles.walletBadge}>
-                <Wallet size={16} color="#0F172A" />
-                <Text style={styles.walletBadgeText}>VÍ NHÓM 3 CÁI L</Text>
-              </View>
-            </View>
-
-            {/* Checkmark Thành công */}
-            <View style={styles.successIconWrapper}>
-              <View style={styles.successCheckCircle}>
-                <CheckCircle2 size={40} color="#0284C7" strokeWidth={2} />
-              </View>
-            </View>
-
-            <Text style={styles.successTitle}>Chuyển thành công</Text>
-            <Text style={styles.successSubtitle}>Giao dịch đã được ghi nhận thành công</Text>
-
-            {/* Số tiền lớn */}
-            <View style={styles.successAmountWrapper}>
-              <Text style={styles.successAmountLabel}>Số tiền</Text>
-              <Text style={styles.successAmountValue}>VND {amount}</Text>
-            </View>
-
-            {/* Thẻ Chi tiết giao dịch hoàn tất */}
-            <View style={styles.successDetailCard}>
-              <View style={styles.successDetailRow}>
-                <View style={styles.successIconBox}>
-                  <Building size={18} color="#64748B" />
-                </View>
-                <View style={styles.successDetailContent}>
-                  <Text style={styles.detailItemLabel}>Tài khoản nhận</Text>
-                  <Text style={styles.detailItemValue}>Ngân hàng MBBank - HOANG NGOC LIEN</Text>
-                </View>
-              </View>
-
-              <View style={styles.successDetailRow}>
-                <View style={styles.successIconBox}>
-                  <MessageSquare size={18} color="#64748B" />
-                </View>
-                <View style={styles.successDetailContent}>
-                  <Text style={styles.detailItemLabel}>Lời nhắn</Text>
-                  <Text style={styles.detailItemValue}>{note || 'Ăn mau chóng lớn'}</Text>
-                </View>
-              </View>
-
-              <View style={styles.successDetailRow}>
-                <View style={styles.successIconBox}>
-                  <Calendar size={18} color="#64748B" />
-                </View>
-                <View style={styles.successDetailContent}>
-                  <Text style={styles.detailItemLabel}>Ngày thực hiện</Text>
-                  <Text style={styles.detailItemValue}>22 thg 10, 2026 lúc 16:30 chiều</Text>
-                </View>
-              </View>
-
-              <View style={styles.successDetailRow}>
-                <View style={styles.successIconBox}>
-                  <Hash size={18} color="#64748B" />
-                </View>
-                <View style={styles.successDetailContent}>
-                  <Text style={styles.detailItemLabel}>Mã giao dịch</Text>
-                  <Text style={styles.detailItemValueCode}>{txCode || '—'}</Text>
-                </View>
-              </View>
-            </View>
-
-            {/* 2 Nút phụ: Chia sẻ & Lưu người nhận */}
-            <View style={styles.actionRow}>
-              <TouchableOpacity
-                style={styles.actionSecondaryBtn}
-                onPress={handleShare}
-                activeOpacity={0.7}
-              >
-                <Share2 size={16} color="#0F172A" />
-                <Text style={styles.actionSecondaryBtnText}>Chia sẻ</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.actionSecondaryBtn}
-                onPress={() => setIsSavedRecipientModalVisible(true)}
-                activeOpacity={0.7}
-              >
-                <Bookmark size={16} color="#0F172A" />
-                <Text style={styles.actionSecondaryBtnText}>Lưu người nhận</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Nút Quay lại màn hình chính */}
-            <TouchableOpacity
-              style={styles.backToHomeBtn}
-              onPress={() => {
-                if (onBackToHome) {
-                  onBackToHome();
-                } else {
-                  setStep('qr');
-                }
-              }}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.backToHomeBtnText}>QUAY LẠI MÀN HÌNH CHÍNH</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </ScrollView>
-
-      {/* ==============================================================
-          BƯỚC 4: MODAL NHẬP MÃ OTP
-      ============================================================== */}
-      <Modal
-        visible={isOtpModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setIsOtpModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.otpModalBox}>
-            {/* Nút X ở góc trên bên phải */}
-            <TouchableOpacity
-              style={styles.otpModalTopClose}
-              onPress={() => {
-                setIsOtpModalVisible(false);
-                setIntentId(null);
-                setOtpCode('');
-                setOtpError('');
-              }}
-              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-              activeOpacity={0.7}
-            >
-              <X size={18} color="#64748B" />
-            </TouchableOpacity>
-
-            <Text style={styles.otpModalTitle}>NHẬP MÃ OTP ĐỂ THANH TOÁN</Text>
-
-            <View style={styles.otpInputBox}>
-              <TextInput
-                style={styles.otpTextInput}
-                value={otpCode}
-                onChangeText={setOtpCode}
-                keyboardType="number-pad"
-                maxLength={6}
-                textAlign="center"
-              />
-            </View>
-
-            {!!maskedEmail && (
-              <Text style={styles.otpCountdownText}>Mã đã được gửi tới {maskedEmail}</Text>
-            )}
-
-            <Text style={styles.otpCountdownText}>
-              {countdown > 0 ? `Mã OTP còn thời hạn ${formatSeconds(countdown)}` : 'Mã OTP đã hết hạn'}
-            </Text>
-
-            {!!otpError && (
               <Text
                 style={[
-                  styles.otpCountdownText,
-                  { color: otpError.includes('thử nghiệm') ? '#0284C7' : '#DC2626' },
+                  styles.tabBtnText,
+                  activeTab === 'scan' && styles.tabBtnTextActive,
                 ]}
               >
-                {otpError}
-              </Text>
-            )}
-
-            <TouchableOpacity onPress={handleResendOtp} disabled={resendIn > 0 || isProcessing} activeOpacity={0.7}>
-              <Text style={[styles.otpCountdownText, { color: resendIn > 0 ? '#94A3B8' : '#0284C7', fontWeight: '700' }]}>
-                {resendIn > 0 ? `Gửi lại mã sau ${resendIn}s` : 'Gửi lại mã'}
+                Quét mã QR
               </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.otpConfirmBtn, isProcessing && { opacity: 0.7 }]}
-              onPress={handleConfirmOtp}
-              disabled={isProcessing}
+              style={[styles.tabBtn, activeTab === 'my_qr' && styles.tabBtnActive]}
+              onPress={() => setActiveTab('my_qr')}
               activeOpacity={0.8}
             >
-              {isProcessing ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Text style={styles.otpConfirmBtnText}>Xác nhận</Text>
-              )}
-            </TouchableOpacity>
-
-            {/* Nút Đóng bên dưới */}
-            <TouchableOpacity
-              style={styles.otpCloseBtn}
-              onPress={() => {
-                setIsOtpModalVisible(false);
-                setIntentId(null);
-                setOtpCode('');
-                setOtpError('');
-              }}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.otpCloseBtnText}>Đóng</Text>
+              <QrCode
+                size={17}
+                color={activeTab === 'my_qr' ? '#ffffff' : '#64748b'}
+              />
+              <Text
+                style={[
+                  styles.tabBtnText,
+                  activeTab === 'my_qr' && styles.tabBtnTextActive,
+                ]}
+              >
+                Mã QR của tôi
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
-      </Modal>
+      )}
 
-      {/* Nạp thêm tiền khi thiếu số dư; xong quay lại màn xác nhận để Tiếp tục / Hủy */}
+      {/* STEP 1: Main Tabs Content */}
+      {step === 'main' && (
+        <ScrollView
+          style={styles.mainScroll}
+          contentContainerStyle={styles.mainScrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {activeTab === 'scan' ? (
+            <ScanQRTab
+              token={token || undefined}
+              onSelectRecipient={handleSelectRecipient}
+            />
+          ) : (
+            <MyQRTab user={user} wallet={wallet} />
+          )}
+        </ScrollView>
+      )}
+
+      {/* STEP 2: Input & Recipient Confirmation Screen */}
+      {step === 'input' && recipient && (
+        <ScrollView
+          style={styles.mainScroll}
+          contentContainerStyle={styles.inputScrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Recipient Card */}
+          <View style={styles.recipientCard}>
+            <View style={styles.recipientAvatar}>
+              <Text style={styles.recipientInitial}>
+                {(recipient.nickname || recipient.username || 'U')
+                  .charAt(0)
+                  .toUpperCase()}
+              </Text>
+            </View>
+            <View style={styles.recipientDetails}>
+              <View style={styles.recipientNameRow}>
+                <Text style={styles.recipientName}>
+                  {recipient.nickname || recipient.username}
+                </Text>
+                <View style={styles.recipientBadge}>
+                  <ShieldCheck size={14} color="#059669" />
+                  <Text style={styles.recipientBadgeText}>FinanceFlow</Text>
+                </View>
+              </View>
+              <Text style={styles.recipientHandle}>@{recipient.username}</Text>
+              {recipient.phone ? (
+                <Text style={styles.recipientPhone}>SĐT: {recipient.phone}</Text>
+              ) : null}
+            </View>
+            <TouchableOpacity
+              style={styles.changeRecipientBtn}
+              onPress={() => setStep('main')}
+            >
+              <Text style={styles.changeRecipientText}>Đổi</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Amount Entry Card */}
+          <View style={styles.formCard}>
+            <View style={styles.cardHeaderRow}>
+              <View style={styles.cardHeaderLeft}>
+                <Banknote size={18} color="#059669" />
+                <Text style={styles.cardTitle}>Số tiền chuyển</Text>
+              </View>
+              {isDynamicAmount ? (
+                <View style={styles.dynamicAmountPill}>
+                  <Sparkles size={12} color="#047857" />
+                  <Text style={styles.dynamicAmountPillText}>Định sẵn từ QR</Text>
+                </View>
+              ) : null}
+            </View>
+
+            <View style={styles.amountInputRow}>
+              <TextInput
+                style={styles.bigAmountInput}
+                keyboardType="numeric"
+                value={amountStr}
+                onChangeText={handleAmountChange}
+                placeholder="0"
+                placeholderTextColor="#94a3b8"
+              />
+              <Text style={styles.currencySuffix}>đ</Text>
+            </View>
+
+            {/* Quick Amount Chips */}
+            <View style={styles.quickAmountsRow}>
+              {QUICK_AMOUNTS.map((item) => (
+                <TouchableOpacity
+                  key={item.label}
+                  style={styles.quickChip}
+                  onPress={() => handleQuickAmountSelect(item.value)}
+                >
+                  <Text style={styles.quickChipText}>{item.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Wallet Source & Balance Check */}
+            <View
+              style={[
+                styles.walletBalanceBar,
+                isInsufficient && styles.walletBalanceBarError,
+              ]}
+            >
+              <View style={styles.walletBarLeft}>
+                <WalletIcon
+                  size={16}
+                  color={isInsufficient ? '#ef4444' : '#059669'}
+                />
+                <Text style={styles.walletBarText}>
+                  {wallet?.name || 'Ví tiền mặt'}:{' '}
+                  <Text style={styles.walletBarBold}>
+                    {walletBalance.toLocaleString('vi-VN')} đ
+                  </Text>
+                </Text>
+              </View>
+              {isInsufficient && (
+                <TouchableOpacity
+                  style={styles.topupInlineBtn}
+                  onPress={() => {
+                    setShortfall(numericAmount - walletBalance);
+                    setIsTopupVisible(true);
+                  }}
+                >
+                  <Plus size={13} color="#ffffff" />
+                  <Text style={styles.topupInlineBtnText}>Nạp thêm</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {isInsufficient && (
+              <View style={styles.shortfallAlert}>
+                <AlertCircle size={14} color="#ef4444" />
+                <Text style={styles.shortfallAlertText}>
+                  Số dư ví không đủ (thiếu{' '}
+                  {(numericAmount - walletBalance).toLocaleString('vi-VN')} đ)
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* Category & Note Card */}
+          <View style={styles.formCard}>
+            <View style={styles.cardHeaderLeft}>
+              <MessageSquare size={18} color="#059669" />
+              <Text style={styles.cardTitle}>Nội dung & Danh mục</Text>
+            </View>
+
+            {/* Category Selector */}
+            <View style={styles.categoriesRow}>
+              {CATEGORIES.map((cat) => {
+                const IconComponent = cat.icon;
+                const isSelected = selectedCategory === cat.id;
+                return (
+                  <TouchableOpacity
+                    key={cat.id}
+                    style={[
+                      styles.categoryChip,
+                      isSelected && styles.categoryChipActive,
+                    ]}
+                    onPress={() => setSelectedCategory(cat.id)}
+                  >
+                    <IconComponent
+                      size={14}
+                      color={isSelected ? '#059669' : '#64748b'}
+                    />
+                    <Text
+                      style={[
+                        styles.categoryChipText,
+                        isSelected && styles.categoryChipTextActive,
+                      ]}
+                    >
+                      {cat.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* Note text input */}
+            <TextInput
+              style={styles.noteTextInput}
+              value={note}
+              onChangeText={setNote}
+              placeholder="Nhập nội dung chuyển tiền..."
+              placeholderTextColor="#94a3b8"
+              maxLength={50}
+            />
+            <Text style={styles.noteLengthText}>{note.length}/50 ký tự</Text>
+          </View>
+
+          {/* Action Button */}
+          <TouchableOpacity
+            style={[
+              styles.primaryBtn,
+              (numericAmount < 1000 || isInsufficient) && styles.primaryBtnDisabled,
+            ]}
+            onPress={handleProceedToPin}
+            disabled={numericAmount < 1000}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.primaryBtnText}>
+              {isInsufficient ? 'Số dư ví không đủ' : 'Tiếp tục chuyển tiền'}
+            </Text>
+          </TouchableOpacity>
+        </ScrollView>
+      )}
+
+      {/* STEP 3: Success Receipt Screen */}
+      {step === 'success' && receipt && (
+        <ScrollView
+          style={styles.mainScroll}
+          contentContainerStyle={styles.receiptScrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.receiptCard}>
+            {/* Animated Check Header */}
+            <View style={styles.receiptHeader}>
+              <View style={styles.receiptIconSuccess}>
+                <CheckCircle2 size={44} color="#059669" />
+              </View>
+              <Text style={styles.receiptTitle}>Chuyển tiền thành công!</Text>
+              <Text style={styles.receiptBigAmount}>
+                -{receipt.amount.toLocaleString('vi-VN')} đ
+              </Text>
+            </View>
+
+            <View style={styles.dashedDivider} />
+
+            {/* Receipt Details Table */}
+            <View style={styles.receiptBody}>
+              <View style={styles.receiptRow}>
+                <Text style={styles.receiptLabel}>Người nhận</Text>
+                <Text style={styles.receiptValueBold}>
+                  {receipt.recipientName}
+                </Text>
+              </View>
+
+              <View style={styles.receiptRow}>
+                <Text style={styles.receiptLabel}>Tài khoản</Text>
+                <Text style={styles.receiptValue}>
+                  @{receipt.recipientUsername}
+                </Text>
+              </View>
+
+              <View style={styles.receiptRow}>
+                <Text style={styles.receiptLabel}>Thời gian</Text>
+                <Text style={styles.receiptValue}>{receipt.date}</Text>
+              </View>
+
+              <View style={styles.receiptRow}>
+                <Text style={styles.receiptLabel}>Mã giao dịch</Text>
+                <Text style={styles.receiptValueCode}>
+                  {receipt.transactionId}
+                </Text>
+              </View>
+
+              <View style={styles.receiptRow}>
+                <Text style={styles.receiptLabel}>Nguồn thanh toán</Text>
+                <Text style={styles.receiptValue}>{receipt.walletName}</Text>
+              </View>
+
+              <View style={styles.receiptRow}>
+                <Text style={styles.receiptLabel}>Nội dung</Text>
+                <Text style={styles.receiptValue}>{receipt.note}</Text>
+              </View>
+
+              <View style={styles.receiptRow}>
+                <Text style={styles.receiptLabel}>Số dư ví sau GD</Text>
+                <Text style={styles.receiptValueBalance}>
+                  {receipt.newBalance.toLocaleString('vi-VN')} đ
+                </Text>
+              </View>
+            </View>
+
+            {/* Bottom Actions */}
+            <View style={styles.receiptActions}>
+              <TouchableOpacity
+                style={styles.shareReceiptBtn}
+                onPress={handleShareReceipt}
+                activeOpacity={0.7}
+              >
+                <Share2 size={16} color="#059669" />
+                <Text style={styles.shareReceiptBtnText}>Chia sẻ biên lai</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.newTransferBtn}
+                onPress={handleResetFlow}
+                activeOpacity={0.8}
+              >
+                <RotateCcw size={16} color="#ffffff" />
+                <Text style={styles.newTransferBtnText}>Giao dịch mới</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </ScrollView>
+      )}
+
+      {/* Topup Modal when balance is insufficient */}
       <TopupModal
         visible={isTopupVisible}
         token={token || undefined}
@@ -848,125 +738,60 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab, hideBotto
         suggestedAmount={shortfall}
         onClose={() => setIsTopupVisible(false)}
         onSuccess={(newBalance) => {
+          if (wallet) {
+            setWallet({ ...wallet, balance: newBalance });
+          }
           setIsTopupVisible(false);
-          if (wallet) setWallet({ ...wallet, balance: newBalance });
-          setStep('confirm');
+          Alert.alert(
+            'Nạp tiền thành công',
+            `Số dư ví hiện tại: ${newBalance.toLocaleString('vi-VN')} đ`
+          );
         }}
       />
 
-      {/* ==============================================================
-          MODAL: THÔNG BÁO LƯU NGƯỜI NHẬN THÀNH CÔNG
-      ============================================================== */}
-      <Modal
-        visible={isSavedRecipientModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setIsSavedRecipientModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.savedRecipientModalCard}>
-            <View style={styles.savedCheckCircle}>
-              <CheckCircle2 size={44} color="#0284C7" />
-            </View>
+      {/* PIN Setup Modal */}
+      <PinSetupModal
+        visible={isPinSetupVisible}
+        token={token || undefined}
+        onSuccess={() => {
+          setIsPinSetupVisible(false);
+          setIsPinInputVisible(true);
+        }}
+        onCancel={() => setIsPinSetupVisible(false)}
+      />
 
-            <Text style={styles.savedModalTitle}>Đã lưu người thụ hưởng</Text>
-            <Text style={styles.savedModalSubtitle}>
-              Thông tin người nhận đã được lưu vào danh bạ an toàn của bạn.
-            </Text>
+      {/* PIN Input Modal */}
+      <PinInputModal
+        visible={isPinInputVisible}
+        title="Xác nhận chuyển tiền"
+        subtitle={`Chuyển ${numericAmount.toLocaleString('vi-VN')} đ đến ${
+          recipient?.nickname || recipient?.username || ''
+        }`}
+        onConfirm={handleConfirmPin}
+        onCancel={() => {
+          setIsPinInputVisible(false);
+          setPinError('');
+        }}
+        onForgotPin={() => {
+          setIsPinInputVisible(false);
+          setIsForgotPinVisible(true);
+        }}
+        onBiometricSuccess={handleBiometricSuccess}
+        errorMessage={pinError}
+        isLoading={isTransferring}
+        lockRemainingSeconds={pinLockRemaining}
+      />
 
-            <View style={styles.savedContactBox}>
-              <Text style={styles.savedContactName}>Bủh (HOANG NGOC LIEN)</Text>
-              <Text style={styles.savedContactBank}>Ngân hàng MBBank • 012345678</Text>
-            </View>
-
-            <TouchableOpacity
-              style={styles.savedGotoCashBtn}
-              onPress={() => {
-                setIsSavedRecipientModalVisible(false);
-                if (onNavigateToTab) onNavigateToTab('cash');
-              }}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.savedGotoCashBtnText}>Mở Sổ quỹ Tiền mặt / Lưu ➔</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.savedCloseBtn}
-              onPress={() => setIsSavedRecipientModalVisible(false)}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.savedCloseBtnText}>Đóng</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* ==============================================================
-          BOTTOM NAVIGATION BAR (Đồng bộ chuẩn Figma)
-      ============================================================== */}
-      {!hideBottomBar && step !== 'success' && (
-        <View style={styles.bottomNavContainer}>
-          <View style={styles.bottomNavBar}>
-            <TouchableOpacity
-              style={styles.navItem}
-              onPress={() => {
-                if (onBackToHome) onBackToHome();
-                else if (onNavigateToTab) onNavigateToTab('finance');
-              }}
-              activeOpacity={0.7}
-            >
-              <View style={styles.navIconCircle}>
-                <Wallet size={20} color="#64748B" />
-              </View>
-              <Text style={styles.navLabel}>Tài chính</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.navItem}
-              onPress={() => onNavigateToTab ? onNavigateToTab('cash') : setStep('qr')}
-              activeOpacity={0.7}
-            >
-              <View style={styles.navIconCircle}>
-                <Plus size={20} color="#64748B" />
-              </View>
-              <Text style={styles.navLabel}>Thêm</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.navItem}
-              onPress={() => onNavigateToTab && onNavigateToTab('save')}
-              activeOpacity={0.7}
-            >
-              <View style={styles.navIconCircle}>
-                <Bookmark size={20} color="#64748B" />
-              </View>
-              <Text style={styles.navLabel}>Lưu</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.navItem}
-              onPress={() => onNavigateToTab && onNavigateToTab('chart')}
-              activeOpacity={0.7}
-            >
-              <View style={styles.navIconCircle}>
-                <BarChart2 size={20} color="#64748B" />
-              </View>
-              <Text style={styles.navLabel}>Biểu đồ</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.navItem}
-              onPress={() => onNavigateToTab && onNavigateToTab('settings')}
-              activeOpacity={0.7}
-            >
-              <View style={styles.navIconCircle}>
-                <Settings size={20} color="#64748B" />
-              </View>
-              <Text style={styles.navLabel}>Cài đặt</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
+      {/* Forgot PIN Modal */}
+      <ForgotPinModal
+        visible={isForgotPinVisible}
+        token={token || undefined}
+        onSuccess={() => {
+          setIsForgotPinVisible(false);
+          setIsPinInputVisible(true);
+        }}
+        onCancel={() => setIsForgotPinVisible(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -974,681 +799,485 @@ export default function PaymentScreen({ onBackToHome, onNavigateToTab, hideBotto
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#BAE6FD',
-    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 28) + 4 : 0,
+    backgroundColor: '#f8fafc',
   },
-  scrollContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 110,
-  },
-  stepContainer: {
-    width: '100%',
-  },
-  topHeader: {
+  headerBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
-    height: 44,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#ffffff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
   },
-  backButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#FFFFFF',
+  headerBackBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
+  },
+  headerTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#0f172a',
+  },
+  tabBarWrapper: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: '#ffffff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8f0',
+    alignItems: 'center',
+  },
+  tabBar: {
+    flexDirection: 'row',
+    backgroundColor: '#f1f5f9',
+    borderRadius: 14,
+    padding: 4,
+    width: '100%',
+    maxWidth: 420,
+  },
+  tabBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  tabBtnActive: {
+    backgroundColor: '#059669',
+    shadowColor: '#059669',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
     shadowRadius: 4,
     elevation: 2,
   },
-  screenTitle: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#0F172A',
+  tabBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#64748b',
   },
-  screenTitleWithBack: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#0F172A',
+  tabBtnTextActive: {
+    color: '#ffffff',
   },
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    padding: 18,
-    marginBottom: 14,
-    shadowColor: '#0284C7',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
+  mainScroll: {
+    flex: 1,
+  },
+  mainScrollContent: {
+    paddingBottom: 24,
+  },
+  inputScrollContent: {
+    padding: 16,
+    paddingBottom: 40,
+    maxWidth: 440,
+    width: '100%',
+    alignSelf: 'center',
+  },
+  recipientCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
     elevation: 2,
   },
-  balanceLabel: {
-    fontSize: 13,
-    color: '#64748B',
-    fontWeight: '500',
-    marginBottom: 4,
-  },
-  balanceRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-  },
-  currencySymbol: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#0F172A',
-    marginRight: 6,
-  },
-  balanceAmount: {
-    fontSize: 30,
-    fontWeight: '800',
-    color: '#0F172A',
-    letterSpacing: -0.5,
-  },
-  cursorBar: {
-    width: 2.5,
-    height: 28,
-    backgroundColor: '#0284C7',
-    marginLeft: 8,
-    borderRadius: 2,
-  },
-  qrCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 28,
-    padding: 24,
+  recipientAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#ecfdf5',
+    borderWidth: 1.5,
+    borderColor: '#059669',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 14,
-    shadowColor: '#0284C7',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    elevation: 3,
+    marginRight: 12,
   },
-  qrContainer: {
-    padding: 10,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
+  recipientInitial: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#059669',
   },
-  qrHint: {
-    marginTop: 14,
-    fontSize: 11,
-    color: '#94A3B8',
-    fontWeight: '500',
-    textAlign: 'center',
+  recipientDetails: {
+    flex: 1,
   },
-  sectionTitle: {
-    fontSize: 14,
+  recipientNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  recipientName: {
+    fontSize: 16,
     fontWeight: '700',
-    color: '#0F172A',
+    color: '#0f172a',
+  },
+  recipientBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    backgroundColor: '#ecfdf5',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  recipientBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#059669',
+  },
+  recipientHandle: {
+    fontSize: 13,
+    color: '#64748b',
+    marginTop: 2,
+  },
+  recipientPhone: {
+    fontSize: 12,
+    color: '#94a3b8',
+    marginTop: 2,
+  },
+  changeRecipientBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: '#f1f5f9',
+  },
+  changeRecipientText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#059669',
+  },
+  formCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    padding: 18,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 12,
   },
-  categoryGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    rowGap: 10,
-  },
-  categoryBtn: {
-    width: '48.5%', // 2 cột cân đối, không phụ thuộc Dimensions và không tràn màn hình
+  cardHeaderLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 16,
-    backgroundColor: '#F8FAFC',
-    borderWidth: 1.5,
-    borderColor: '#E2E8F0',
+    marginBottom: 12,
   },
-  categoryBtnFull: {
-    width: '100%',
-  },
-  categoryBtnActive: {
-    borderColor: '#0284C7',
-    backgroundColor: '#F0F9FF',
-  },
-  categoryLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#1E293B',
-    flexShrink: 1,
-  },
-  categoryLabelActive: {
-    color: '#0284C7',
-    fontWeight: '700',
-  },
-  continuePaymentBtn: {
-    backgroundColor: '#0284C7',
-    borderRadius: 18,
-    paddingVertical: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 6,
-    marginBottom: 8,
-    shadowColor: '#0284C7',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  continuePaymentBtnText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  accountHolderText: {
+  cardTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#0F172A',
-    marginBottom: 2,
+    color: '#0f172a',
   },
-  accountNumberText: {
-    fontSize: 13,
-    color: '#64748B',
-    fontWeight: '500',
-  },
-  inputBox: {
+  dynamicAmountPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F8FAFC',
+    gap: 4,
+    backgroundColor: '#ecfdf5',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    height: 48,
+    borderColor: '#a7f3d0',
   },
-  textInput: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  inputSuffix: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#64748B',
-  },
-  noteInputBox: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 14,
-    color: '#0F172A',
-    minHeight: 48,
-  },
-  noteInputBoxError: {
-    borderColor: '#F87171',
-    backgroundColor: '#FEF2F2',
-  },
-  errorText: {
-    color: '#EF4444',
+  dynamicAmountPillText: {
     fontSize: 11,
-    fontWeight: '500',
-    marginTop: 6,
-    marginLeft: 4,
+    fontWeight: '600',
+    color: '#047857',
+  },
+  amountInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: '#059669',
+    paddingVertical: 6,
+    marginBottom: 14,
+  },
+  bigAmountInput: {
+    flex: 1,
+    fontSize: 32,
+    fontWeight: '800',
+    color: '#0f172a',
+  },
+  currencySuffix: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#059669',
+    marginLeft: 8,
+  },
+  quickAmountsRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginBottom: 14,
+  },
+  quickChip: {
+    flex: 1,
+    paddingVertical: 7,
+    backgroundColor: '#f1f5f9',
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  walletBalanceBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#f8fafc',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  walletBalanceBarError: {
+    borderColor: '#fca5a5',
+    backgroundColor: '#fef2f2',
+  },
+  walletBarLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  walletBarText: {
+    fontSize: 12,
+    color: '#64748b',
+  },
+  walletBarBold: {
+    fontWeight: '700',
+    color: '#0f172a',
+  },
+  topupInlineBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#059669',
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+  },
+  topupInlineBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  shortfallAlert: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+  },
+  shortfallAlertText: {
+    fontSize: 12,
+    color: '#ef4444',
+  },
+  categoriesRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 14,
+  },
+  categoryChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  categoryChipActive: {
+    backgroundColor: '#ecfdf5',
+    borderColor: '#059669',
+  },
+  categoryChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  categoryChipTextActive: {
+    color: '#059669',
+  },
+  noteTextInput: {
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#0f172a',
+    backgroundColor: '#f8fafc',
+  },
+  noteLengthText: {
+    textAlign: 'right',
+    fontSize: 11,
+    color: '#94a3b8',
+    marginTop: 4,
   },
   primaryBtn: {
-    backgroundColor: '#BAE6FD',
-    borderRadius: 24,
-    height: 52,
+    backgroundColor: '#059669',
+    paddingVertical: 15,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 8,
-    shadowColor: '#0284C7',
+    shadowColor: '#059669',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.25,
     shadowRadius: 10,
     elevation: 3,
   },
   primaryBtnDisabled: {
-    backgroundColor: '#CBD5E1',
+    backgroundColor: '#94a3b8',
     shadowOpacity: 0,
-    elevation: 0,
   },
   primaryBtnText: {
     fontSize: 16,
-    fontWeight: '800',
-    color: '#0F172A',
-  },
-  confirmCardTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#0F172A',
-    marginBottom: 16,
-  },
-  confirmRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  confirmLabel: {
-    fontSize: 13,
-    color: '#64748B',
-    fontWeight: '500',
-  },
-  confirmValue: {
-    fontSize: 14,
-    color: '#0F172A',
-    fontWeight: '600',
-  },
-  confirmValueBold: {
-    fontSize: 16,
-    color: '#0F172A',
-    fontWeight: '800',
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#E2E8F0',
-    marginVertical: 14,
-  },
-  sectionSubTitle: {
-    fontSize: 14,
     fontWeight: '700',
-    color: '#0F172A',
-    marginBottom: 10,
+    color: '#ffffff',
   },
-  confirmDetailItem: {
-    marginBottom: 10,
-  },
-  detailLabel: {
-    fontSize: 12,
-    color: '#94A3B8',
-    fontWeight: '500',
-  },
-  detailValue: {
-    fontSize: 14,
-    color: '#0F172A',
-    fontWeight: '600',
-    marginTop: 1,
-  },
-  detailValueBold: {
-    fontSize: 15,
-    color: '#0F172A',
-    fontWeight: '800',
-    marginTop: 2,
-  },
-  nextStepText: {
-    fontSize: 13,
-    color: '#64748B',
-    fontWeight: '500',
-    marginBottom: 10,
-  },
-  otpActionBtn: {
-    backgroundColor: '#7DD3FC',
-    borderRadius: 20,
-    height: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  otpActionBtnText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.45)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  otpModalBox: {
-    position: 'relative',
-    width: '100%',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 28,
-    padding: 24,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.15,
-    shadowRadius: 24,
-    elevation: 8,
-  },
-  otpModalTopClose: {
-    position: 'absolute',
-    top: 16,
-    right: 16,
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: '#F1F5F9',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 10,
-  },
-  otpCloseBtn: {
-    width: '100%',
-    backgroundColor: '#F8FAFC',
-    borderRadius: 20,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 10,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  otpCloseBtnText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#64748B',
-  },
-  otpModalTitle: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#475569',
-    textAlign: 'center',
-    marginBottom: 16,
-    letterSpacing: 0.5,
-  },
-  otpInputBox: {
-    width: '100%',
-    backgroundColor: '#F8FAFC',
-    borderWidth: 1.5,
-    borderColor: '#E2E8F0',
-    borderRadius: 16,
-    height: 52,
-    justifyContent: 'center',
-    marginBottom: 12,
-  },
-  otpTextInput: {
-    fontSize: 22,
-    fontWeight: '800',
-    letterSpacing: 6,
-    color: '#0F172A',
-  },
-  otpCountdownText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#EF4444',
-    marginBottom: 18,
-  },
-  otpConfirmBtn: {
-    width: '100%',
-    backgroundColor: '#BAE6FD',
-    borderRadius: 20,
-    height: 46,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  otpConfirmBtnText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  walletBadgeRow: {
-    alignItems: 'center',
-    marginVertical: 12,
-  },
-  walletBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 1,
-  },
-  walletBadgeText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  successIconWrapper: {
-    alignItems: 'center',
-    marginTop: 10,
-    marginBottom: 12,
-  },
-  successCheckCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: '#E0F2FE',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  successTitle: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#0F172A',
-    textAlign: 'center',
-  },
-  successSubtitle: {
-    fontSize: 12,
-    color: '#64748B',
-    textAlign: 'center',
-    marginTop: 4,
-    marginBottom: 20,
-  },
-  successAmountWrapper: {
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  successAmountLabel: {
-    fontSize: 13,
-    color: '#64748B',
-    marginBottom: 4,
-  },
-  successAmountValue: {
-    fontSize: 32,
-    fontWeight: '900',
-    color: '#0F172A',
-    letterSpacing: -0.5,
-  },
-  successDetailCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 24,
+  receiptScrollContent: {
     padding: 16,
-    marginBottom: 16,
+    paddingBottom: 40,
+    maxWidth: 440,
+    width: '100%',
+    alignSelf: 'center',
   },
-  successDetailRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-  },
-  successIconBox: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    backgroundColor: '#F8FAFC',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 2,
-  },
-  successDetailContent: {
-    flex: 1,
-  },
-  detailItemLabel: {
-    fontSize: 11,
-    color: '#94A3B8',
-    fontWeight: '500',
-  },
-  detailItemValue: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#0F172A',
-    marginTop: 2,
-  },
-  detailItemValueCode: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#0284C7',
-    marginTop: 2,
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-  },
-  actionRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 16,
-  },
-  actionSecondaryBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    height: 44,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  actionSecondaryBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  backToHomeBtn: {
-    backgroundColor: '#CBD5E1',
+  receiptCard: {
+    backgroundColor: '#ffffff',
     borderRadius: 24,
-    height: 52,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  backToHomeBtnText: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#334155',
-    letterSpacing: 0.5,
-  },
-  bottomNavContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    paddingHorizontal: 20,
-    paddingBottom: Platform.OS === 'ios' ? 24 : 16,
-    backgroundColor: 'transparent',
-  },
-  bottomNavBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 36,
-    height: 64,
-    paddingHorizontal: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 16,
-    elevation: 8,
-  },
-  navItem: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  navIconCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  navIconCircleActive: {
-    backgroundColor: '#BAE6FD',
-  },
-  navLabel: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: '#64748B',
-    marginTop: 2,
-  },
-  navLabelActive: {
-    color: '#0F172A',
-    fontWeight: '700',
-  },
-  savedRecipientModalCard: {
-    width: '88%',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 28,
     padding: 24,
-    alignItems: 'center',
-    shadowColor: '#000',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    shadowColor: '#0f172a',
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
-    shadowRadius: 24,
-    elevation: 10,
+    shadowOpacity: 0.1,
+    shadowRadius: 18,
+    elevation: 4,
   },
-  savedCheckCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: '#E0F2FE',
+  receiptHeader: {
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  receiptIconSuccess: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#ecfdf5',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 14,
   },
-  savedModalTitle: {
+  receiptTitle: {
     fontSize: 18,
-    fontWeight: '900',
-    color: '#0F172A',
-    marginBottom: 6,
+    fontWeight: '700',
+    color: '#0f172a',
+    marginBottom: 8,
   },
-  savedModalSubtitle: {
-    fontSize: 12,
-    color: '#64748B',
-    textAlign: 'center',
-    marginBottom: 16,
-    lineHeight: 18,
+  receiptBigAmount: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: '#059669',
   },
-  savedContactBox: {
-    width: '100%',
-    backgroundColor: '#F8FAFC',
-    borderRadius: 16,
-    padding: 14,
+  dashedDivider: {
+    height: 1,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    marginBottom: 18,
+    borderColor: '#e2e8f0',
+    borderStyle: 'dashed',
+    marginVertical: 18,
+  },
+  receiptBody: {
+    gap: 12,
+    marginBottom: 24,
+  },
+  receiptRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
   },
-  savedContactName: {
+  receiptLabel: {
+    fontSize: 13,
+    color: '#64748b',
+  },
+  receiptValue: {
+    fontSize: 13,
+    color: '#0f172a',
+    fontWeight: '500',
+    maxWidth: '65%',
+    textAlign: 'right',
+  },
+  receiptValueBold: {
     fontSize: 14,
-    fontWeight: '800',
-    color: '#0F172A',
+    fontWeight: '700',
+    color: '#0f172a',
   },
-  savedContactBank: {
+  receiptValueCode: {
     fontSize: 12,
-    color: '#0284C7',
-    fontWeight: '600',
-    marginTop: 2,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    color: '#475569',
   },
-  savedGotoCashBtn: {
-    width: '100%',
-    backgroundColor: '#0284C7',
-    borderRadius: 18,
-    paddingVertical: 14,
+  receiptValueBalance: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#059669',
+  },
+  receiptActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  shareReceiptBtn: {
+    flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 10,
+    gap: 6,
+    paddingVertical: 13,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: '#059669',
+    backgroundColor: '#ecfdf5',
   },
-  savedGotoCashBtnText: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  savedCloseBtn: {
-    paddingVertical: 8,
-  },
-  savedCloseBtnText: {
-    fontSize: 13,
+  shareReceiptBtnText: {
+    fontSize: 14,
     fontWeight: '700',
-    color: '#64748B',
+    color: '#059669',
+  },
+  newTransferBtn: {
+    flex: 1.2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 13,
+    borderRadius: 14,
+    backgroundColor: '#059669',
+  },
+  newTransferBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#ffffff',
   },
 });
