@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE_URL as ROOT_API_URL } from './config';
 import { securityApi } from './security';
+import { dispatchBalanceNotification } from '../services/socketService';
 
 export interface P2PRecipient {
   id: string;
@@ -267,6 +268,16 @@ export const p2pApi = {
       // Trừ số dư ví
       wallet.balance -= numericAmount;
       await saveLocalWallets(wallets, token);
+
+      // Phát thông báo biến động số dư ("Ting Ting") cho người chuyển
+      dispatchBalanceNotification({
+        type: 'transfer',
+        direction: 'out',
+        amount: numericAmount,
+        walletName: wallet.name || 'Ví tiền mặt',
+        newBalance: wallet.balance,
+        note: data.note || 'Chuyển tiền P2P',
+      });
 
       // Tra cứu tên người nhận
       const mock = MOCK_RECIPIENTS.find(

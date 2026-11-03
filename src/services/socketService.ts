@@ -71,7 +71,12 @@ export const dispatchBalanceNotification = (data: BalanceNotificationPayload) =>
  * Khởi tạo kết nối Socket.io với máy chủ kèm JWT token xác thực
  */
 export const initSocketConnection = (token?: string): Socket | null => {
-  if (socket && socket.connected) {
+  const currentToken = token || useAuthStore.getState().token || '';
+  if (!currentToken) {
+    return null;
+  }
+
+  if (socket && (socket.connected || (socket as any).active)) {
     return socket;
   }
 
@@ -84,13 +89,17 @@ export const initSocketConnection = (token?: string): Socket | null => {
 
   socket = io(socketUrl, {
     auth: {
-      token: token || useAuthStore.getState().token || '',
+      token: currentToken,
     },
     transports: ['websocket', 'polling'],
     reconnection: true,
     reconnectionAttempts: 5,
     reconnectionDelay: 2000,
     timeout: 10000,
+  });
+
+  socket.on('connect', () => {
+    // Connected
   });
 
   socket.on('balance:change', (payload: BalanceNotificationPayload) => {

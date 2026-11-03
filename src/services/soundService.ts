@@ -1,3 +1,5 @@
+import { Vibration } from 'react-native';
+
 /**
  * Bộ tạo âm thanh chuông ngân hàng chân thực (Banking Chime Synthesizer)
  * Tự tổng hợp sóng âm Sine C6 - E6 (1046.5Hz - 1318.5Hz) tạo tiếng "Ting-Ting"
@@ -35,10 +37,22 @@ export const soundService = {
   },
 
   /**
-   * Phát âm thanh chuông biến động số dư
+   * Phát âm thanh chuông biến động số dư và rung xúc giác (haptic feedback)
    * @param direction 'in' (tiền vào -> chuông ting-ting 2 nốt cao) hoặc 'out' (tiền ra -> chuông trầm thanh thoát)
    */
   playChime(direction: 'in' | 'out' = 'in'): void {
+    // 1. Phản hồi rung haptic trên thiết bị thật
+    try {
+      if (direction === 'in') {
+        Vibration.vibrate([0, 100, 80, 120]);
+      } else {
+        Vibration.vibrate(100);
+      }
+    } catch {
+      // Ignore
+    }
+
+    // 2. Phát âm thanh ngân chuông qua Web Audio
     try {
       const ctx = getAudioContext();
       if (!ctx) return;

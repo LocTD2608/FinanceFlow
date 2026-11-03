@@ -95,8 +95,7 @@ export default function App() {
     <SafeAreaProvider style={styles.container}>
       <StatusBar style="dark" />
 
-      {/* Floating Realtime Balance Notification Banner ("Ting Ting") */}
-      <BalanceToastBanner />
+
 
       {/* 1. Màn hình mở đầu (Onboarding) chuẩn mascot chú gấu cầm tiền */}
       {currentScreen === 'welcome' && (
@@ -135,6 +134,9 @@ export default function App() {
           <FinancialCenterScreen onLogout={() => setCurrentScreen('welcome')} />
         )
       )}
+
+      {/* Floating Realtime Balance Notification Banner ("Ting Ting") - Đặt ở cuối cùng để nổi trên tất cả màn hình */}
+      <BalanceToastBanner />
     </SafeAreaProvider>
   );
 }

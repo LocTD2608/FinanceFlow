@@ -161,6 +161,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 99999,
+    elevation: 99999,
     alignItems: 'center',
     paddingHorizontal: 16,
   },

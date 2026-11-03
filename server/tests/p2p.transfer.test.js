@@ -41,6 +41,8 @@ const Wallet = require('../src/models/Wallet');
 const Transaction = require('../src/models/Transaction');
 const P2PTransfer = require('../src/models/P2PTransfer');
 const pushService = require('../src/services/push.service');
+const realtimeService = require('../src/services/realtime.service');
+jest.spyOn(realtimeService, 'emitBalanceChange');
 const p2pRoutes = require('../src/routes/p2p.routes');
 
 const app = express();
@@ -278,6 +280,24 @@ describe('P2P Transfer & Recipient Lookup API', () => {
         expect.objectContaining({
           title: expect.any(String),
           body: expect.stringContaining('250.000'),
+        })
+      );
+
+      // Kiểm tra phát sự kiện biến động số dư Realtime Ting Ting cho cả 2 bên
+      expect(realtimeService.emitBalanceChange).toHaveBeenCalledWith(
+        RECIPIENT_ID,
+        expect.objectContaining({
+          direction: 'in',
+          amount: transferAmount,
+          newBalance: 450000,
+        })
+      );
+      expect(realtimeService.emitBalanceChange).toHaveBeenCalledWith(
+        SENDER_ID,
+        expect.objectContaining({
+          direction: 'out',
+          amount: transferAmount,
+          newBalance: 750000,
         })
       );
     });

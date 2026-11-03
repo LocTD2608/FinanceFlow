@@ -26,7 +26,7 @@ export const getApiBaseUrl = (): string => {
 
   // 3. iPhone / Thiết bị thật chạy Wi-Fi cục bộ
   if (Platform.OS === 'ios') {
-    return 'http://192.168.1.200:5000/api';
+    return 'http://172.31.99.178:5000/api';
   }
 
   // 4. Web browser trên máy tính

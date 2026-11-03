@@ -45,6 +45,7 @@ import { categoryApi, CategoryItemData } from '../../api/category';
 import { p2pApi, P2PRecipient } from '../../api/p2p';
 import { securityApi } from '../../api/security';
 import { soundService } from '../../services/soundService';
+import { dispatchBalanceNotification } from '../../services/socketService';
 
 import ScanQRTab from './ScanQRTab';
 import MyQRTab from './MyQRTab';
@@ -281,8 +282,15 @@ export default function PaymentScreen({
       if (res.success && res.data) {
         setIsPinInputVisible(false);
 
-        // Sound chime for outgoing payment
-        soundService.playChime('out');
+        // Phát thông báo Ting Ting ("Tiền ra") kèm chuông xác nhận chuyển tiền
+        dispatchBalanceNotification({
+          type: 'transfer',
+          direction: 'out',
+          amount: numericAmount,
+          walletName: wallet?.name || 'Ví tiền mặt',
+          newBalance: res.data.newBalance,
+          note: note.trim() || `Chuyển tiền đến ${res.data.recipientName || recipient.nickname || recipient.username}`,
+        });
 
         // Refresh transactions and store
         fetchTransactions(token || undefined);
