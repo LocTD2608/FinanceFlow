@@ -238,20 +238,11 @@ export default function DailyExpenseChart({ token, monthStr, refreshKey }: Props
                 strokeWidth={2.5}
               />
 
-              {/* Các điểm tròn (dots) và nhãn ngày */}
+              {/* Các điểm tròn (dots) và nhãn ngày (chỉ vẽ SVG thuần túy) */}
               {points.map((pt) => {
                 const isSelected = pt.day === selectedDay;
                 return (
                   <React.Fragment key={`pt-${pt.day}`}>
-                    {/* Vùng bấm to hơn */}
-                    <Circle
-                      cx={pt.x}
-                      cy={pt.y}
-                      r={14}
-                      fill="transparent"
-                      onPress={() => setSelectedDay(pt.day)}
-                    />
-
                     {/* Chấm tròn biểu diễn điểm */}
                     <Circle
                       cx={pt.x}
@@ -270,7 +261,6 @@ export default function DailyExpenseChart({ token, monthStr, refreshKey }: Props
                       fontSize={11}
                       fontWeight={isSelected ? '900' : '600'}
                       textAnchor="middle"
-                      onPress={() => setSelectedDay(pt.day)}
                     >
                       {pt.day}
                     </SvgText>
@@ -278,6 +268,22 @@ export default function DailyExpenseChart({ token, monthStr, refreshKey }: Props
                 );
               })}
             </Svg>
+
+            {/* Vùng chạm/click tương tác cho từng ngày (Hoạt động mượt mà trên cả Web & Mobile, tránh lỗi WebShape) */}
+            {points.map((pt) => (
+              <TouchableOpacity
+                key={`touch-${pt.day}`}
+                activeOpacity={0.6}
+                style={[
+                  styles.dayTouchTarget,
+                  {
+                    left: Math.max(0, pt.x - DAY_WIDTH / 2),
+                    width: DAY_WIDTH,
+                  },
+                ]}
+                onPress={() => setSelectedDay(pt.day)}
+              />
+            ))}
 
             {/* Tooltip hiển thị số tiền nổi trên điểm được chọn */}
             {selectedPoint && (
@@ -357,6 +363,12 @@ const styles = StyleSheet.create({
   chartWrapper: {
     position: 'relative',
     marginTop: 6,
+  },
+  dayTouchTarget: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    zIndex: 2,
   },
   tooltipBadge: {
     position: 'absolute',
