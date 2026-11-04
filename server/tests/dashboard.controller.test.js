@@ -28,7 +28,7 @@ beforeEach(() => {
 describe('summary', () => {
   it('period sai -> 400', async () => {
     const res = mockRes();
-    await ctrl.summary(mockReq({ period: 'day' }), res);
+    await ctrl.summary(mockReq({ period: 'invalid_period' }), res);
     expect(res.status).toHaveBeenCalledWith(400);
   });
 

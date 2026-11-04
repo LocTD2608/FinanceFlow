@@ -2,7 +2,7 @@ const { getPeriodRange } = require('../src/utils/period');
 
 describe('getPeriodRange', () => {
   it('period/date không hợp lệ -> null', () => {
-    expect(getPeriodRange('day', '2026-10-11')).toBeNull();
+    expect(getPeriodRange('invalid_period', '2026-10-11')).toBeNull();
     expect(getPeriodRange('month', 'abc')).toBeNull();
     expect(getPeriodRange('month', '2026-02-31')).toBeNull();
   });
