@@ -600,3 +600,4 @@
 
   return ChiikawaMascot;
 }));
+

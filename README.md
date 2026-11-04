@@ -221,3 +221,4 @@ async function sendToAI(prompt) {
 ## 🛠️ Bản quyền & Tài nguyên
 - Biểu cảm được trích xuất và xử lý nền trong suốt, thân trắng đặc từ bộ sticker Chiikawa chính thức.
 - Tương thích 100% với mọi trình duyệt hiện đại (Chrome, Edge, Safari, Firefox, iOS, Android).
+

@@ -66,3 +66,4 @@ export const ChiikawaMascotComponent = React.forwardRef(({
 });
 
 export default ChiikawaMascotComponent;
+
