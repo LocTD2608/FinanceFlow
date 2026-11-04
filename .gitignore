@@ -1,0 +1,20 @@
+# Logs and temporary scripts
+*.log
+test_*.js
+shot_*.js
+*.tmp
+aura_*.png
+chiikawa_*.png
+reverted_live.png
+
+# Builds & Cache
+__pycache__/
+.vercel/
+node_modules/
+
+# System & OS
+.DS_Store
+Thumbs.db
+
+
+.vercel

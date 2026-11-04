@@ -1,0 +1,17 @@
+{
+  "name": "chiikawa-ai-mascot",
+  "version": "1.0.0",
+  "description": "Interactive Chiikawa AI Chat Mascot Component with 12 authentic poses, physics animations and sound effects",
+  "main": "chiikawa-mascot.js",
+  "style": "chiikawa-mascot.css",
+  "keywords": [
+    "mascot",
+    "ai-chat",
+    "chiikawa",
+    "avatar",
+    "chatbot",
+    "ui"
+  ],
+  "author": "lienne2006",
+  "license": "MIT"
+}

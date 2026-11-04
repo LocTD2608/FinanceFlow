@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ví Dụ Tích Hợp Chiikawa AI Mascot</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f172a;
+      color: #f8fafc;
+      margin: 0;
+      padding: 40px 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      box-sizing: border-box;
+    }
+
+    .chat-card {
+      width: 100%;
+      max-width: 480px;
+      background: #1e293b;
+      border-radius: 24px;
+      padding: 24px;
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .mascot-slot {
+      min-height: 300px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .chat-form {
+      width: 100%;
+      display: flex;
+      gap: 8px;
+    }
+
+    .chat-input {
+      flex: 1;
+      padding: 12px 16px;
+      border-radius: 12px;
+      border: 1px solid #334155;
+      background: #0f172a;
+      color: white;
+      font-size: 14px;
+      outline: none;
+    }
+
+    .chat-input:focus {
+      border-color: #f43f5e;
+    }
+
+    .chat-btn {
+      background: #f43f5e;
+      color: white;
+      border: none;
+      border-radius: 12px;
+      padding: 0 18px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+  </style>
+  <script src="../chiikawa-mascot.js"></script>
+</head>
+<body>
+
+  <div class="chat-card">
+    <!-- Slot chứa Mascot -->
+    <div id="mascot" class="mascot-slot"></div>
+
+    <!-- Ô nhập tin nhắn cho AI -->
+    <form class="chat-form" id="chatForm">
+      <input type="text" id="userInput" class="chat-input" placeholder="Hỏi gì đó đi bạn ơi..." required />
+      <button type="submit" class="chat-btn">Gửi 🚀</button>
+    </form>
+  </div>
+
+  <script>
+    // Khởi tạo Mascot
+    const mascot = new ChiikawaMascot({
+      container: '#mascot',
+      size: 240,
+      initialPose: 'hello',
+      initialText: 'Chào bạn! Tớ là trợ lý AI Chiikawa nè~! 👋',
+      assetPath: '../chiikawa_poses/'
+    });
+
+    // Xử lý gửi tin nhắn AI
+    const form = document.getElementById('chatForm');
+    const input = document.getElementById('userInput');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const question = input.value.trim();
+      if (!question) return;
+      input.value = '';
+
+      // Bước 1: Khi nhận câu hỏi -> Mascot suy nghĩ
+      mascot.think(`Đang suy nghĩ về "${question}"...`);
+
+      await new Promise(r => setTimeout(r, 1200));
+
+      // Bước 2: Khi gọi API AI -> Mascot đang tải
+      mascot.load('Đang tra cứu dữ liệu...');
+
+      await new Promise(r => setTimeout(r, 1600));
+
+      // Bước 3: Khi AI trả về câu trả lời
+      mascot.answer(`Câu trả lời cho "${question}": Trời hôm nay rất đẹp, chúc bạn học tập tốt! ☀️✨`);
+    });
+  </script>
+</body>
+</html>
