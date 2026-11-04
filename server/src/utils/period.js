@@ -2,7 +2,7 @@
  * Tính khoảng thời gian (tuần/tháng/năm) theo giờ Hà Nội (Asia/Ho_Chi_Minh, UTC+7).
  * Tuần bắt đầu từ Thứ 2. Khoảng thời gian dạng [from, to).
  */
-const PERIODS = ['week', 'month', 'year'];
+const PERIODS = ['day', 'week', 'month', 'year'];
 const OFFSET_MS = 7 * 60 * 60 * 1000; // UTC+7
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -43,6 +43,7 @@ const boundsOf = (period, dayMs) => {
   const d = new Date(dayMs);
   const y = d.getUTCFullYear();
   const m = d.getUTCMonth();
+  if (period === 'day') return [dayMs, dayMs + DAY_MS];
   if (period === 'week') {
     const dow = (d.getUTCDay() + 6) % 7; // Thứ 2 = 0
     const start = dayMs - dow * DAY_MS;
@@ -54,6 +55,7 @@ const boundsOf = (period, dayMs) => {
 
 // Một đơn vị kỳ trước, tính từ ngày bắt đầu kỳ hiện tại
 const previousStart = (period, startLocal) => {
+  if (period === 'day') return startLocal - DAY_MS;
   if (period === 'week') return startLocal - 7 * DAY_MS;
   const d = new Date(startLocal);
   if (period === 'month') return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1);
