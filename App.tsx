@@ -29,7 +29,13 @@ export default function App() {
   useEffect(() => {
     loadSession();
     loadSettings();
-  }, [loadSession, loadSettings]);
+    const timer = setTimeout(() => {
+      if (useAuthStore.getState().isLoading) {
+        useAuthStore.setState({ isLoading: false });
+      }
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Mở khóa Web Audio khi có tương tác đầu tiên
   useEffect(() => {
@@ -72,6 +78,7 @@ export default function App() {
     }
   }, [token, user?.status, logout]);
 
+  console.log('[App] render - isLoading:', isLoading, 'screen:', currentScreen, 'user:', user?.username);
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>

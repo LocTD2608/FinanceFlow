@@ -1,4 +1,5 @@
-require('dotenv').config();
+require('dns').setServers(['8.8.8.8', '1.1.1.1']);
+require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
 const http = require('http');
 const express = require('express');
 const { initSocket } = require('./socket');
@@ -89,7 +90,7 @@ const start = async () => {
     require('./jobs/netWorth.job').start();
     require('./jobs/billReminder.job').start();
   }
-  server.listen(PORT, () => {
+  server.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 FinanceFlow Backend & WebSocket đang chạy tại http://localhost:${PORT}`);
   });
 };

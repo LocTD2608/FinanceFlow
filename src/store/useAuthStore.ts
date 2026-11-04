@@ -1,4 +1,3 @@
-import { useTransactionStore } from './useTransactionStore';
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { User, authApi } from '../api/auth';
@@ -58,13 +57,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   logout: async () => {
     await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
-    try { useTransactionStore.getState().reset(); } catch {}
+    try {
+      const { useTransactionStore } = require('./useTransactionStore');
+      useTransactionStore.getState().reset();
+    } catch {}
     set({ user: null, token: null, activeMode: 'user' });
   },
 
   loadSession: async () => {
     try {
-      const raw = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500));
+      const raw = await Promise.race([
+        AsyncStorage.getItem(AUTH_STORAGE_KEY),
+        timeoutPromise,
+      ]);
       if (raw) {
         const { user, token } = JSON.parse(raw);
         const activeMode = user?.role === 'admin' ? 'admin' : 'user';

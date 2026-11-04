@@ -34,6 +34,7 @@ exports.initSocket = (httpServer) => {
   });
 
   io.on('connection', (socket) => {
+    console.log('⚡ Socket client connected, userId:', socket.user?.id || socket.user?._id);
     const userId = socket.user?.id || socket.user?._id;
     if (userId) {
       socket.join(`user_${userId}`);

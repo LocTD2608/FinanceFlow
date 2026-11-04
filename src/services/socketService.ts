@@ -3,8 +3,6 @@ import { API_BASE_URL } from '../api/config';
 import { soundService } from './soundService';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useNotificationStore } from '../store/useNotificationStore';
-import { useTransactionStore } from '../store/useTransactionStore';
-import { useAuthStore } from '../store/useAuthStore';
 
 export interface BalanceNotificationPayload {
   id?: string;
@@ -54,6 +52,8 @@ export const dispatchBalanceNotification = (data: BalanceNotificationPayload) =>
 
   // 3. Tự động làm mới dữ liệu giao dịch & tổng quan trên Dashboard
   try {
+    const { useAuthStore } = require('../store/useAuthStore');
+    const { useTransactionStore } = require('../store/useTransactionStore');
     const token = useAuthStore.getState().token || undefined;
     const txStore = useTransactionStore.getState();
     if (typeof txStore.fetchSummary === 'function') {
@@ -71,7 +71,7 @@ export const dispatchBalanceNotification = (data: BalanceNotificationPayload) =>
  * Khởi tạo kết nối Socket.io với máy chủ kèm JWT token xác thực
  */
 export const initSocketConnection = (token?: string): Socket | null => {
-  const currentToken = token || useAuthStore.getState().token || '';
+  const currentToken = token || (() => { try { return require('../store/useAuthStore').useAuthStore.getState().token || ''; } catch { return ''; } })();
   if (!currentToken) {
     return null;
   }

@@ -51,17 +51,24 @@ exports.lookupRecipient = async (req, res) => {
       }
     }
 
+    const cleanQ = q.replace(/^@/, '').trim();
     const filter = [];
     if (parsedQrUserId) {
       filter.push({ _id: parsedQrUserId });
     }
-    if (isValidId(q)) {
-      filter.push({ _id: q });
+    if (isValidId(cleanQ)) {
+      filter.push({ _id: cleanQ });
     }
-    filter.push({ username: { $regex: `^${q}$`, $options: 'i' } });
-    filter.push({ phone: q });
-    filter.push({ email: q.toLowerCase() });
-    filter.push({ qrCodePayload: q });
+    filter.push({ username: { $regex: `^${cleanQ}$`, $options: 'i' } });
+    filter.push({ phone: cleanQ });
+    filter.push({ email: cleanQ.toLowerCase() });
+    filter.push({ qrCodePayload: cleanQ });
+    if (cleanQ.toLowerCase() === 'demo' || cleanQ.toLowerCase() === 'demo_user') {
+      filter.push({ email: 'demo@financeflow.vn' });
+    }
+    if (cleanQ.toLowerCase() === 'admin') {
+      filter.push({ email: 'admin@financeflow.vn' });
+    }
 
     let recipient = await User.findOne({ $or: filter });
 
