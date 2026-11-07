@@ -31,14 +31,15 @@ const deltasFor = ({ type, amount, walletId, destinationWalletId }, revert = fal
  * Áp một thay đổi số dư. Trả về ví sau cập nhật, hoặc null nếu bị từ chối
  * (khoản trừ làm ví thường âm).
  */
-const applyDelta = async (walletId, delta) => {
+const applyDelta = async (walletId, delta, options = {}) => {
+  const updateOptions = { new: true, ...options };
   if (delta >= 0) {
-    return Wallet.findByIdAndUpdate(walletId, { $inc: { balance: delta } }, { new: true });
+    return Wallet.findByIdAndUpdate(walletId, { $inc: { balance: delta } }, updateOptions);
   }
   return Wallet.findOneAndUpdate(
     { _id: walletId, $or: [{ type: 'credit_card' }, { balance: { $gte: -delta } }] },
     { $inc: { balance: delta } },
-    { new: true }
+    updateOptions
   );
 };
 
@@ -47,15 +48,15 @@ const applyDelta = async (walletId, delta) => {
  * trên cùng một ví không bị từ chối oan). Một khoản thất bại thì hoàn tác các khoản đã áp.
  * @returns {Promise<{ok: true} | {ok: false, walletId: any, delta: number}>}
  */
-const applyDeltas = async (deltas) => {
+const applyDeltas = async (deltas, options = {}) => {
   const ordered = [...deltas].sort((a, b) => b.delta - a.delta);
   const applied = [];
   for (const d of ordered) {
-    const result = await applyDelta(d.walletId, d.delta);
+    const result = await applyDelta(d.walletId, d.delta, options);
     if (!result) {
       for (const done of applied.reverse()) {
         // Hoàn tác thô, không áp điều kiện số dư
-        await Wallet.findByIdAndUpdate(done.walletId, { $inc: { balance: -done.delta } }, { new: true });
+        await Wallet.findByIdAndUpdate(done.walletId, { $inc: { balance: -done.delta } }, { new: true, ...options });
       }
       return { ok: false, walletId: d.walletId, delta: d.delta };
     }
