@@ -9,6 +9,8 @@ Backend Node >= 20 (đã kiểm thử Node 24), Express/Mongoose. Không cần S
 - `MONGODB_URI`: dùng MongoDB Atlas hoặc replica set để xác nhận thao tác. MongoDB standalone chỉ dùng hỏi đáp/bản nháp, xác nhận trả `503 TRANSACTION_UNSUPPORTED`.
 - `JWT_SECRET`: dùng cấu hình xác thực hiện có; đăng nhập lấy bearer token.
 
+Trước triển khai production, chạy `npm run db:sync` trong `server` với đúng `MONGODB_URI` để tạo các index (gồm TTL hội thoại/action/quota và unique ngân sách/giao dịch). Backend tắt `autoIndex` khi `NODE_ENV=production`; không bỏ qua bước này. Kiểm tra log không có lỗi đồng bộ index trước khi mở traffic.
+
 Nghiên cứu: [Gemini function calling](https://ai.google.dev/gemini-api/docs/function-calling) cho phép model đề xuất hàm và đối số, ứng dụng chịu trách nhiệm thực thi. [Thought signatures](https://ai.google.dev/gemini-api/docs/thought-signatures) phải được giữ nguyên trong vòng gọi công cụ. [Model Gemini 2.5 Flash](https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash). [Dialogflow CX](https://docs.cloud.google.com/dialogflow/cx/docs/basics) là lựa chọn theo luồng; dự án chọn Gemini để hỗ trợ cả câu hỏi mở và thao tác có cấu trúc.
 
 ## Phạm vi

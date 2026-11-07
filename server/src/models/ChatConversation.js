@@ -53,6 +53,7 @@ const chatConversationSchema = new mongoose.Schema(
       ref: 'ChatAction',
       default: null,
     },
+    actionVersion: { type: Number, default: 0 },
     activeActionId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'ChatAction',

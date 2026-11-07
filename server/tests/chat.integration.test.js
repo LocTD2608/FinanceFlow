@@ -10,7 +10,7 @@ const ChatConversation = require('../src/models/ChatConversation');
 const ChatAction = require('../src/models/ChatAction');
 const ChatQuota = require('../src/models/ChatQuota');
 const { confirm, cancel } = require('../src/services/chat/actions');
-const { acquireConversation, saveTurn, releaseConversation, consumeQuota } = require('../src/services/chat/state');
+const { acquireConversation, saveTurn, releaseConversation, consumeQuota, getConversation } = require('../src/services/chat/state');
 const { validateDraft } = require('../src/services/chat/tools');
 jest.setTimeout(180000);
 let mongo, uid, wallet, category;
@@ -45,6 +45,7 @@ test('draft writes no money; simultaneous and repeated confirmation execute once
   expect(await Transaction.countDocuments()).toBe(1);
   expect((await Wallet.findById(wallet._id)).balance).toBe(50000);
   expect(realtime.emitBalanceChange).toHaveBeenCalledTimes(1);
+  expect((await getConversation(uid, result.conversationId)).pendingAction.status).toBe('confirmed');
 });
 test('foreign owner, cancelled, expired and replaced drafts cannot write', async () => {
   const first = await draft();
@@ -91,4 +92,20 @@ test('leases and shared quota reject concurrent excess requests', async () => {
   await releaseConversation(uid, lease);
   const results = await Promise.allSettled(Array.from({ length: 15 }, () => consumeQuota(uid, 'message', 10)));
   expect(results.filter(r => r.status === 'fulfilled')).toHaveLength(10);
+});
+test('a late save cannot publish a draft and orphan action is removed', async () => {
+  const lease = await acquireConversation(uid);
+  lease.deadlineAt = Date.now() - 1;
+  const proposed = await validateDraft(uid, 'create_budget', { categoryId: String(category._id), limitAmount: 50 });
+  await expect(saveTurn(uid, lease, 'x', 'preview', [], proposed)).rejects.toMatchObject({ status: 409 });
+  expect(await ChatAction.countDocuments()).toBe(0);
+  expect((await ChatConversation.findById(lease.conversation._id)).messages).toHaveLength(0);
+});
+test('confirm racing cancellation has exactly one outcome', async () => {
+  const result = await draft();
+  await Promise.allSettled([confirm(uid, result.pendingAction.id), cancel(uid, result.pendingAction.id)]);
+  const action = await ChatAction.findById(result.pendingAction.id);
+  const count = await Transaction.countDocuments();
+  expect(count).toBe(action.status === 'confirmed' ? 1 : 0);
+  expect((await Wallet.findById(wallet._id)).balance).toBe(count ? 50000 : 100000);
 });

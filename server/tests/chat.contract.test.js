@@ -53,3 +53,25 @@ test('deadline rejects even a provider mock that ignores abort', async () => {
   expect(state.saveTurn).not.toHaveBeenCalled();
   expect(state.releaseConversation).toHaveBeenCalled();
 });
+test('a second draft proposal cannot replace the first in the same turn', async () => {
+  const draft = { kind: 'create_transaction', payload: { amount: 50 } };
+  tools.executeTool.mockResolvedValue({ draft });
+  gemini.generate.mockResolvedValueOnce({ role: 'model', parts: [
+    { functionCall: { name: 'draft_transaction', args: { amount: 50 } } },
+    { functionCall: { name: 'draft_transaction', args: { amount: 100 } } },
+  ] }).mockResolvedValueOnce(answer);
+  await sendMessage('u', { message: 'x' });
+  expect(tools.executeTool).toHaveBeenCalledTimes(1);
+  expect(state.saveTurn.mock.calls[0][5]).toEqual(draft);
+});
+test('a stalled persistence or lease cleanup cannot hold the response beyond deadline', async () => {
+  jest.useFakeTimers();
+  gemini.generate.mockResolvedValue(answer);
+  state.saveTurn.mockImplementation(() => new Promise(() => {}));
+  state.releaseConversation.mockImplementation(() => new Promise(() => {}));
+  const pending = sendMessage('u', { message: 'x' });
+  const checked = expect(pending).rejects.toMatchObject({ status: 504 });
+  await jest.advanceTimersByTimeAsync(30001);
+  await checked;
+  expect(jest.getTimerCount()).toBe(0);
+});

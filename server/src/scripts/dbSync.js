@@ -13,6 +13,9 @@ const Category = require('../models/Category');
 const P2PTransfer = require('../models/P2PTransfer');
 const Goal = require('../models/Goal');
 const GoalContribution = require('../models/GoalContribution');
+const ChatConversation = require('../models/ChatConversation');
+const ChatAction = require('../models/ChatAction');
+const ChatQuota = require('../models/ChatQuota');
 
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/financeflow_dev';
 
@@ -32,6 +35,9 @@ async function syncIndexes() {
     { name: 'P2PTransfer', model: P2PTransfer },
     { name: 'Goal', model: Goal },
     { name: 'GoalContribution', model: GoalContribution },
+    { name: 'ChatConversation', model: ChatConversation },
+    { name: 'ChatAction', model: ChatAction },
+    { name: 'ChatQuota', model: ChatQuota },
   ];
 
   for (const { name, model } of models) {

@@ -1,0 +1,32 @@
+const { MongoMemoryServer } = require('mongodb-memory-server');
+const mongoose = require('mongoose');
+jest.mock('../src/services/realtime.service', () => ({ emitBalanceChange: jest.fn() }));
+const Wallet = require('../src/models/Wallet');
+const Category = require('../src/models/Category');
+const Transaction = require('../src/models/Transaction');
+const Conversation = require('../src/models/ChatConversation');
+const Action = require('../src/models/ChatAction');
+const { confirm } = require('../src/services/chat/actions');
+const { acquireConversation, releaseConversation, saveTurn } = require('../src/services/chat/state');
+const { validateDraft } = require('../src/services/chat/tools');
+jest.setTimeout(180000);
+let mongo;
+beforeAll(async () => {
+  mongo = await MongoMemoryServer.create({ binary: { version: '7.0.14' } });
+  await mongoose.connect(mongo.getUri(), { dbName: 'kan34_standalone_test' });
+  await Promise.all([Wallet, Category, Transaction, Conversation, Action].map(m => m.init()));
+});
+afterAll(async () => { await mongoose.disconnect(); if (mongo) await mongo.stop(); });
+test('standalone MongoDB cannot confirm and does not change money or action state', async () => {
+  const uid = new mongoose.Types.ObjectId().toString();
+  const wallet = await Wallet.create({ userId: uid, name: 'Test', balance: 100 });
+  const category = await Category.create({ name: 'Food', type: 'expense' });
+  const lease = await acquireConversation(uid);
+  const draft = await validateDraft(uid, 'create_transaction', { type: 'expense', amount: 50, walletId: String(wallet._id), categoryId: String(category._id) });
+  const result = await saveTurn(uid, lease, 'x', 'preview', [], draft);
+  await releaseConversation(uid, lease);
+  await expect(confirm(uid, result.pendingAction.id)).rejects.toMatchObject({ status: 503, code: 'TRANSACTION_UNSUPPORTED' });
+  expect((await Wallet.findById(wallet._id)).balance).toBe(100);
+  expect(await Transaction.countDocuments()).toBe(0);
+  expect((await Action.findById(result.pendingAction.id)).status).toBe('pending');
+});

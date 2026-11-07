@@ -28,7 +28,7 @@ async function confirm(userId, id) {
       if (action.status === 'confirmed') return { result: action.result };
       // Write both documents to serialize confirmation against draft replacement and cancellation.
       const conversation = await Conversation.findOneAndUpdate({ _id: action.conversationId, userId, pendingActionId: action._id,
-        expiresAt: { $gt: new Date() }, lockUntil: { $lte: new Date() } }, { $set: { pendingActionId: null } }, { session, new: true });
+        expiresAt: { $gt: new Date() }, lockUntil: { $lte: new Date() } }, { $inc: { actionVersion: 1 } }, { session, new: true });
       if (!conversation) throw new ChatError(409, 'ACTION_CONFLICT', 'Hội thoại đang xử lý hoặc bản nháp đã bị thay thế.');
       const p = action.payload;
       const input = action.kind === 'create_transaction'

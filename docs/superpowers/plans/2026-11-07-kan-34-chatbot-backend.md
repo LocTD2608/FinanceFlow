@@ -1,6 +1,6 @@
 # Kế hoạch Triển khai Chi tiết: Backend Chatbot FinanceFlow với Gemini (KAN-34)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Xây dựng hệ thống API backend cho chatbot thông minh FinanceFlow tích hợp Gemini Function Calling: hỗ trợ hỏi đáp bằng tiếng Việt, truy vấn số liệu tài chính cá nhân (thu/chi/số dư/ngân sách theo múi giờ UTC+7), tạo bản nháp hành động (thêm giao dịch, tạo ngân sách) với cơ chế xác nhận/hủy nguyên tử qua MongoDB Transaction, kèm TypeScript API client cho ứng dụng frontend.
 
@@ -47,7 +47,7 @@
 **Interfaces:**
 - Produces: Mongoose models `ChatConversation` và `ChatAction` với đầy đủ indexes, TTL 30 ngày, validation các trường bắt buộc.
 
-- [ ] **Step 1: Viết test kiểm tra schema validation và indexes cho `ChatConversation` và `ChatAction`**
+- [x] **Step 1: Viết test kiểm tra schema validation và indexes cho `ChatConversation` và `ChatAction`**
 
 ```javascript
 // server/tests/chat.models.test.js
@@ -76,12 +76,12 @@ describe('Chat Models Unit Tests', () => {
 });
 ```
 
-- [ ] **Step 2: Chạy test để xác nhận test thất bại**
+- [x] **Step 2: Chạy test để xác nhận test thất bại**
 
 Run: `npm --prefix server test tests/chat.models.test.js`
 Expected: FAIL (Cannot find module '../src/models/ChatConversation')
 
-- [ ] **Step 3: Triển khai `ChatConversation.js` và `ChatAction.js`**
+- [x] **Step 3: Triển khai `ChatConversation.js` và `ChatAction.js`**
 
 Tạo `server/src/models/ChatConversation.js`:
 - `userId`: `ObjectId`, ref `User`, `required: true`, `index: true`.
@@ -103,12 +103,12 @@ Tạo `server/src/models/ChatAction.js`:
 - `resultSummary`: `Object`, `default: null`.
 - `timestamps: true`, TTL index: `{ createdAt: 1 }, { expireAfterSeconds: 30 * 24 * 3600 }`.
 
-- [ ] **Step 4: Chạy lại test để xác nhận test pass**
+- [x] **Step 4: Chạy lại test để xác nhận test pass**
 
 Run: `npm --prefix server test tests/chat.models.test.js`
 Expected: PASS
 
-- [ ] **Step 5: Commit thay đổi Task 1**
+- [x] **Step 5: Commit thay đổi Task 1**
 
 ```bash
 git add server/src/models/ChatConversation.js server/src/models/ChatAction.js server/tests/chat.models.test.js
@@ -127,7 +127,7 @@ git commit -m "feat(chatbot): dinh nghia mongoose models ChatConversation va Cha
 - Consumes: Mongoose `ClientSession` từ `runInTransaction`.
 - Produces: `applyDelta(walletId, delta, options)` và `applyDeltas(deltas, options)` nhận `{ session }` tùy chọn, giữ nguyên 100% tương thích ngược với code hiện tại.
 
-- [ ] **Step 1: Viết test cho `applyDelta` và `applyDeltas` khi có session**
+- [x] **Step 1: Viết test cho `applyDelta` và `applyDeltas` khi có session**
 
 ```javascript
 // server/tests/walletBalance.session.test.js
@@ -165,12 +165,12 @@ describe('walletBalance with session', () => {
 });
 ```
 
-- [ ] **Step 2: Chạy test để kiểm tra thất bại**
+- [x] **Step 2: Chạy test để kiểm tra thất bại**
 
 Run: `npm --prefix server test tests/walletBalance.session.test.js`
 Expected: FAIL (options.session not passed to findByIdAndUpdate)
 
-- [ ] **Step 3: Cập nhật `server/src/utils/walletBalance.js`**
+- [x] **Step 3: Cập nhật `server/src/utils/walletBalance.js`**
 
 Bổ sung tham số `options = {}` vào `applyDelta` và `applyDeltas`:
 ```javascript
@@ -207,12 +207,12 @@ const applyDeltas = async (deltas, options = {}) => {
 };
 ```
 
-- [ ] **Step 4: Chạy test unit và test hồi quy cho ví**
+- [x] **Step 4: Chạy test unit và test hồi quy cho ví**
 
 Run: `npm --prefix server test tests/walletBalance.session.test.js tests/budget.wallet.test.js tests/transaction.controller.test.js`
 Expected: ALL PASS
 
-- [ ] **Step 5: Commit thay đổi Task 2**
+- [x] **Step 5: Commit thay đổi Task 2**
 
 ```bash
 git add server/src/utils/walletBalance.js server/tests/walletBalance.session.test.js
@@ -237,7 +237,7 @@ git commit -m "feat(chatbot): cap nhat walletBalance ho tro truyen session trong
   - `proposeTransaction(userId, conversationId, { amount, type, walletId, categoryId, note, date })`: Tạo bản nháp `ChatAction`.
   - `proposeBudget(userId, conversationId, { categoryId, limitAmount, month })`: Tạo bản nháp `ChatAction`.
 
-- [ ] **Step 1: Viết test cho các tool nghiệp vụ tài chính của Chatbot**
+- [x] **Step 1: Viết test cho các tool nghiệp vụ tài chính của Chatbot**
 
 ```javascript
 // server/tests/chat.tools.test.js
@@ -275,12 +275,12 @@ describe('ChatTools Service Unit Tests', () => {
 });
 ```
 
-- [ ] **Step 2: Chạy test để xác nhận thất bại**
+- [x] **Step 2: Chạy test để xác nhận thất bại**
 
 Run: `npm --prefix server test tests/chat.tools.test.js`
 Expected: FAIL (Cannot find module '../src/services/chatTools.service')
 
-- [ ] **Step 3: Triển khai `server/src/services/chatTools.service.js`**
+- [x] **Step 3: Triển khai `server/src/services/chatTools.service.js`**
 
 Cung cấp đầy đủ:
 - Tích hợp `period.getPeriodRange(period, date)` tính đúng `from` và `to` UTC+7.
@@ -291,12 +291,12 @@ Cung cấp đầy đủ:
 - Tạo `ChatAction` mới với `expiresAt = new Date(Date.now() + 10 * 60 * 1000)` (10 phút).
 - Chuẩn hóa trường `preview` rõ ràng (Tên ví, tên danh mục, số tiền format `100.000 đ`, ngày giao dịch...).
 
-- [ ] **Step 4: Chạy lại test suite để kiểm tra tính đúng đắn**
+- [x] **Step 4: Chạy lại test suite để kiểm tra tính đúng đắn**
 
 Run: `npm --prefix server test tests/chat.tools.test.js`
 Expected: PASS
 
-- [ ] **Step 5: Commit thay đổi Task 3**
+- [x] **Step 5: Commit thay đổi Task 3**
 
 ```bash
 git add server/src/services/chatTools.service.js server/tests/chat.tools.test.js
@@ -315,7 +315,7 @@ git commit -m "feat(chatbot): implement chatTools service truy van du lieu va ta
 - Consumes: `process.env.GEMINI_API_KEY`, `process.env.GEMINI_MODEL`, `chatTools.service.js`.
 - Produces: `executeChatTurn({ userId, conversationId, messageHistory, userMessage })` -> `{ reply, facts, pendingAction }`.
 
-- [ ] **Step 1: Viết test cho `gemini.service.js` (kiểm tra mock provider, tool loop, rate limiter, message limit)**
+- [x] **Step 1: Viết test cho `gemini.service.js` (kiểm tra mock provider, tool loop, rate limiter, message limit)**
 
 ```javascript
 // server/tests/gemini.service.test.js
@@ -348,12 +348,12 @@ describe('Gemini Service Unit Tests', () => {
 });
 ```
 
-- [ ] **Step 2: Chạy test để xác nhận thất bại**
+- [x] **Step 2: Chạy test để xác nhận thất bại**
 
 Run: `npm --prefix server test tests/gemini.service.test.js`
 Expected: FAIL (Cannot find module '../src/services/gemini.service')
 
-- [ ] **Step 3: Triển khai `server/src/services/gemini.service.js`**
+- [x] **Step 3: Triển khai `server/src/services/gemini.service.js`**
 
 - Định nghĩa Tool Declarations tương thích OpenAPI / Gemini function calling:
   - `get_financial_summary`: `{ period: { type: 'string', enum: ['day','week','month','year'] }, date: { type: 'string' } }`
@@ -367,12 +367,12 @@ Expected: FAIL (Cannot find module '../src/services/gemini.service')
 - Kiểm soát vòng lặp: Tối đa 4 vòng gọi tool, tối đa 8 tool calls tổng. Timeout 30 giây bằng `AbortController`.
 - Rate limit 10 lượt AI/phút/user bằng atomic tracking.
 
-- [ ] **Step 4: Chạy test để xác nhận pass**
+- [x] **Step 4: Chạy test để xác nhận pass**
 
 Run: `npm --prefix server test tests/gemini.service.test.js`
 Expected: PASS
 
-- [ ] **Step 5: Commit thay đổi Task 4**
+- [x] **Step 5: Commit thay đổi Task 4**
 
 ```bash
 git add server/src/services/gemini.service.js server/tests/gemini.service.test.js
@@ -396,7 +396,7 @@ git commit -m "feat(chatbot): xay dung gemini service voi function calling va to
   - `POST /actions/:id/confirm`: Xác nhận action trong MongoDB transaction nguyên tử.
   - `POST /actions/:id/cancel`: Hủy action bản nháp.
 
-- [ ] **Step 1: Viết test cho luồng xác nhận và hủy action**
+- [x] **Step 1: Viết test cho luồng xác nhận và hủy action**
 
 ```javascript
 // server/tests/chat.controller.test.js
@@ -431,12 +431,12 @@ describe('Chat Controller Action Endpoints', () => {
 });
 ```
 
-- [ ] **Step 2: Chạy test để xác nhận thất bại**
+- [x] **Step 2: Chạy test để xác nhận thất bại**
 
 Run: `npm --prefix server test tests/chat.controller.test.js`
 Expected: FAIL (Cannot find module '../src/routes/chat.routes')
 
-- [ ] **Step 3: Triển khai `chat.controller.js` và `chat.routes.js`**
+- [x] **Step 3: Triển khai `chat.controller.js` và `chat.routes.js`**
 
 - `sendMessage`: 
   - Khóa hội thoại bằng `lockExpiresAt` để tránh race condition khi gửi tin nhắn đồng thời.
@@ -452,12 +452,12 @@ Expected: FAIL (Cannot find module '../src/routes/chat.routes')
   - Sau khi `runInTransaction` hoàn tất, gọi `realtimeService.emitBalanceChange(...)` nếu là giao dịch tài chính.
 - `cancelAction`: Chuyển status sang `cancelled`.
 
-- [ ] **Step 4: Chạy test unit và integration cho Controller**
+- [x] **Step 4: Chạy test unit và integration cho Controller**
 
 Run: `npm --prefix server test tests/chat.controller.test.js`
 Expected: PASS
 
-- [ ] **Step 5: Commit thay đổi Task 5**
+- [x] **Step 5: Commit thay đổi Task 5**
 
 ```bash
 git add server/src/controllers/chat.controller.js server/src/routes/chat.routes.js server/tests/chat.controller.test.js
@@ -477,7 +477,7 @@ git commit -m "feat(chatbot): implement chat controller va routes voi transactio
 - Consumes: `app.use('/api/chat', chatRoutes)`.
 - Produces: API endpoint `/api/chat` sẵn sàng phục vụ.
 
-- [ ] **Step 1: Viết test integration tổng thể cho `/api/chat` routes trên server instance**
+- [x] **Step 1: Viết test integration tổng thể cho `/api/chat` routes trên server instance**
 
 ```javascript
 // server/tests/chat.integration.test.js
@@ -492,12 +492,12 @@ describe('Chat API Integration Check', () => {
 });
 ```
 
-- [ ] **Step 2: Chạy test để xác nhận thất bại (do route chưa gắn vào `src/index.js`)**
+- [x] **Step 2: Chạy test để xác nhận thất bại (do route chưa gắn vào `src/index.js`)**
 
 Run: `npm --prefix server test tests/chat.integration.test.js`
 Expected: FAIL (404 Not Found)
 
-- [ ] **Step 3: Gắn `chatRoutes` vào `server/src/index.js` và cập nhật `server/.env.example`**
+- [x] **Step 3: Gắn `chatRoutes` vào `server/src/index.js` và cập nhật `server/.env.example`**
 
 Trong `server/src/index.js`:
 ```javascript
@@ -514,12 +514,12 @@ GEMINI_API_KEY=your_gemini_api_key_here
 GEMINI_MODEL=gemini-1.5-flash
 ```
 
-- [ ] **Step 4: Chạy lại test integration**
+- [x] **Step 4: Chạy lại test integration**
 
 Run: `npm --prefix server test tests/chat.integration.test.js`
 Expected: PASS
 
-- [ ] **Step 5: Commit thay đổi Task 6**
+- [x] **Step 5: Commit thay đổi Task 6**
 
 ```bash
 git add server/src/index.js server/.env.example server/tests/chat.integration.test.js
@@ -538,7 +538,7 @@ git commit -m "feat(chatbot): dang ky chat routes vao server express va cap nhat
 - Consumes: `src/api/config.ts` (`API_BASE_URL`), AsyncStorage token.
 - Produces: Module `chatApi` xuất các phương thức `sendMessage`, `getConversation`, `confirmAction`, `cancelAction` cùng các interface TypeScript (`ChatMessage`, `ChatActionPreview`, `ChatResponse`).
 
-- [ ] **Step 1: Viết test cho `chatApi` client trong `tests/unit/chatApi.test.ts`**
+- [x] **Step 1: Viết test cho `chatApi` client trong `tests/unit/chatApi.test.ts`**
 
 ```typescript
 // tests/unit/chatApi.test.ts
@@ -572,12 +572,12 @@ describe('chatApi TypeScript Client', () => {
 });
 ```
 
-- [ ] **Step 2: Chạy test client**
+- [x] **Step 2: Chạy test client**
 
 Run: `npm test tests/unit/chatApi.test.ts`
 Expected: FAIL (Cannot find module '../../src/api/chat')
 
-- [ ] **Step 3: Triển khai `src/api/chat.ts`**
+- [x] **Step 3: Triển khai `src/api/chat.ts`**
 
 Tạo đầy đủ các interfaces TypeScript:
 - `ChatActionPreview`: `id`, `type`, `previewDetails`, `expiresAt`, `status`.
@@ -589,13 +589,13 @@ Tạo đầy đủ các interfaces TypeScript:
   - `confirmAction(actionId: string, token: string)`
   - `cancelAction(actionId: string, token: string)`
 
-- [ ] **Step 4: Chạy test và kiểm tra TypeScript typing toàn dự án**
+- [x] **Step 4: Chạy test và kiểm tra TypeScript typing toàn dự án**
 
 Run: `npm test tests/unit/chatApi.test.ts`
 Run: `npm run type-check`
 Expected: ALL PASS (0 errors)
 
-- [ ] **Step 5: Commit thay đổi Task 7**
+- [x] **Step 5: Commit thay đổi Task 7**
 
 ```bash
 git add src/api/chat.ts tests/unit/chatApi.test.ts
@@ -609,23 +609,31 @@ git commit -m "feat(chatbot): them typescript api client chatApi cho frontend"
 **Files:**
 - Test: Tất cả tests trong `server/tests/` và `tests/unit/`
 
-- [ ] **Step 1: Chạy toàn bộ test suite của server backend**
+- [x] **Step 1: Chạy toàn bộ test suite của server backend**
 
 Run: `npm --prefix server test`
 Expected: ALL PASS
 
-- [ ] **Step 2: Chạy toàn bộ test suite của client**
+- [x] **Step 2: Chạy toàn bộ test suite của client**
 
 Run: `npm test`
 Expected: ALL PASS
 
-- [ ] **Step 3: Kiểm tra `git status` và git diff đảm bảo sạch sẽ**
+- [x] **Step 3: Kiểm tra `git status` và git diff đảm bảo sạch sẽ**
 
 Run: `git status`
 Expected: Clean working tree
 
-- [ ] **Step 4: Push nhánh lên remote repository**
+- [x] **Step 4: Push nhánh lên remote repository**
 
 ```bash
 git push origin feat/financial-center
 ```
+
+- Tasks 1–4: implemented; final delivery verification recorded below. Native fetch and Gemini model/key configuration verified without exposing secrets; live Gemini skipped because no key/model is configured locally.
+- Real MongoDB 7.0.14 replica-set tests verify repeated/concurrent confirm, cancellation races, rollback, ownership, duplicate budget, quota and late publication. A separate standalone test verifies 503 without data mutation.
+- Ruling: retain compatible model fields and walletBalance session support from concurrent commits 68322ba/13d4516. Retain improved quota upsert race handling. Repair overwritten orchestration with regression tests; do not rewrite another process's commits.
+- Review findings resolved: quota charged once, all function calls answered, one draft per turn, 20-message context, authoritative action state, bounded persistence/cleanup and server-time publication deadline.
+- Ruling: conversation keeps its last action pointer after confirmation, with actionVersion incremented transactionally. This preserves confirmed status for follow-up chat while serializing replacement/confirmation.
+- Concurrent process committed implementation as bfa7cd2 while final fixes were in progress. Delivery adds a separate KAN-34 fix commit and checks the remote branch.
+- Final verification: 30 backend suites / 313 tests passed; 9 frontend suites / 37 tests passed; TypeScript type-check passed; dbSync syntax and git diff checks passed. Registered chat indexes in dbSync because production disables autoIndex. User authorized stopping concurrent worker; Orca confirmed its terminal process stopped before final delivery.

@@ -64,6 +64,7 @@ async function saveTurn(userId, lease, message, reply, facts, draft) {
   while (Buffer.byteLength(JSON.stringify(messages)) > 65536 && messages.length > 2) messages.splice(0, 2);
   try {
     const saved = await Conversation.findOneAndUpdate({ _id: lease.conversation._id, userId, lockToken: lease.token,
+      $expr: { $lt: ['$$NOW', new Date(lease.deadlineAt || lease.conversation.lockUntil)] },
       lockUntil: { $gt: new Date() }, expiresAt: { $gt: new Date() } },
     { $set: { messages, ...(action ? { pendingActionId: action._id } : {}) } }, { new: true });
     if (!saved) throw new ChatError(409, 'CHAT_LEASE_EXPIRED', 'Hội thoại hết thời gian xử lý. Vui lòng gửi lại.');
