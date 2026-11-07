@@ -2,6 +2,11 @@
 
 Tất cả endpoint yêu cầu `Authorization: Bearer <token>`.
 
+## Chatbot (KAN-34)
+
+`POST /api/chat/messages`, `GET /api/chat/conversations/:id`, `POST /api/chat/actions/:id/confirm`, `POST /api/chat/actions/:id/cancel`.
+Gemini chỉ đọc dữ liệu và đề xuất bản nháp; xác nhận riêng mới ghi thu/chi hoặc ngân sách. Xem [cấu hình, hợp đồng frontend và ví dụ API](CHATBOT_API.md).
+
 ## Ví
 | Method | Path | Mô tả |
 |---|---|---|

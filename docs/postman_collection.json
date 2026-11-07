@@ -5,6 +5,7 @@
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
+{"key":"chatBaseUrl","value":"http://localhost:5000/api/chat","type":"string"},
     {
       "key": "baseUrl",
       "value": "http://localhost:5000/api/v1",
@@ -27,6 +28,76 @@
     ]
   },
   "item": [
+{
+  "name": "Chatbot KAN-34",
+  "description": "Confirm only after reviewing pendingAction.preview. Set conversationId/actionId from response. Requires MongoDB replica set to confirm.",
+  "item": [
+    {
+      "name": "Send message",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{chatBaseUrl}}/messages",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"H??ng d?n t?o ng?n s?ch\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Read conversation",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{chatBaseUrl}}/conversations/{{conversationId}}"
+      }
+    },
+    {
+      "name": "Confirm draft",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{chatBaseUrl}}/actions/{{actionId}}/confirm",
+        "body": {
+          "mode": "raw",
+          "raw": "{}"
+        }
+      }
+    },
+    {
+      "name": "Cancel draft",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{chatBaseUrl}}/actions/{{actionId}}/cancel",
+        "body": {
+          "mode": "raw",
+          "raw": "{}"
+        }
+      }
+    }
+  ]
+},
     {
       "name": "1. Authentication",
       "item": [

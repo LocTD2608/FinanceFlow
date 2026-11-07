@@ -4,8 +4,11 @@ const messageSchema = new mongoose.Schema(
   {
     role: {
       type: String,
-      enum: ['user', 'assistant', 'model', 'system'],
       required: true,
+    },
+    text: {
+      type: String,
+      default: '',
     },
     content: {
       type: String,
@@ -45,14 +48,28 @@ const chatConversationSchema = new mongoose.Schema(
       type: [messageSchema],
       default: [],
     },
+    pendingActionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ChatAction',
+      default: null,
+    },
     activeActionId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'ChatAction',
       default: null,
     },
-    lockExpiresAt: {
-      type: Date,
+    lockToken: {
+      type: String,
       default: null,
+    },
+    lockUntil: {
+      type: Date,
+      default: () => new Date(0),
+    },
+    expiresAt: {
+      type: Date,
+      default: () => new Date(Date.now() + 30 * 86400000),
+      index: true,
     },
   },
   {

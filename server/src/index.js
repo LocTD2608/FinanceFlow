@@ -21,6 +21,7 @@ const securityRoutes = require('./routes/security.routes');
 const p2pRoutes = require('./routes/p2p.routes');
 const reportRoutes = require('./routes/report.routes');
 const goalRoutes = require('./routes/goal.routes');
+const chatRoutes = require('./routes/chat.routes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -72,6 +73,7 @@ app.use('/api/reports', reportRoutes);
 
 // 12. Quản lý mục tiêu tài chính (Tiết kiệm)
 app.use('/api/goals', goalRoutes);
+app.use('/api/chat', chatRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
