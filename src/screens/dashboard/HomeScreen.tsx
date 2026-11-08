@@ -8,6 +8,7 @@ import AddTransactionModal from './AddTransactionModal';
 import {
   ArrowDownLeft,
   ArrowUpRight,
+  ArrowLeftRight,
   LogOut,
   Wallet,
   PieChart,
@@ -138,30 +139,33 @@ export default function HomeScreen({ onLogout }: Props) {
         ) : (
           <View style={styles.txList}>
             {transactions.slice(0, 10).map((tx) => {
-              const isIncome = tx.type === 'income';
+              const isIncome = tx.type === 'income' || (tx.type as any) === 'transfer_in' || (tx.type as any) === 'p2p_in';
+              const isTransfer = (tx.type as any) === 'transfer_in' || (tx.type as any) === 'transfer_out' || (tx.type as any) === 'p2p_in' || (tx.type as any) === 'p2p_out';
               const dateText = tx.transactionDate ? new Date(tx.transactionDate).toLocaleDateString('vi-VN') : '';
               return (
                 <View key={tx._id || tx.id} style={styles.txItem}>
                   <View
                     style={[
                       styles.txIconCircle,
-                      { backgroundColor: isIncome ? '#DCFCE7' : '#FEE2E2' },
+                      { backgroundColor: isIncome ? '#DCFCE7' : isTransfer ? '#EDE9FE' : '#FEE2E2' },
                     ]}
                   >
-                    {isIncome ? (
+                    {isTransfer ? (
+                      <ArrowLeftRight size={18} color="#7C3AED" />
+                    ) : isIncome ? (
                       <ArrowDownLeft size={18} color="#16A34A" />
                     ) : (
                       <ArrowUpRight size={18} color="#DC2626" />
                     )}
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.txTitle}>{tx.note || (isIncome ? 'Thu nhập' : 'Chi tiêu')}</Text>
+                    <Text style={styles.txTitle}>{tx.note || (isIncome ? 'Nhận tiền' : isTransfer ? 'Chuyển tiền' : 'Chi tiêu')}</Text>
                     <Text style={styles.txDate}>{dateText}</Text>
                   </View>
                   <Text
                     style={[
                       styles.txAmount,
-                      { color: isIncome ? '#16A34A' : '#DC2626' },
+                      { color: isIncome ? '#16A34A' : isTransfer ? '#7C3AED' : '#DC2626' },
                     ]}
                   >
                     {isIncome ? '+' : '-'}{formatVND(tx.amount)}

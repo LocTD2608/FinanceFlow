@@ -17,6 +17,7 @@ import {
   Calendar,
   Search,
   ArrowUpDown,
+  ArrowLeftRight,
   Plus,
   Utensils,
   ShoppingBag,
@@ -143,27 +144,37 @@ export default function ExpenseAnalyticsScreen({
   }, [token, fetchTransactions]);
 
   const activeExpenses: ExpenseItem[] = useMemo(() => {
-    const expenseList = transactions.filter((t) => t.type === 'expense');
+    const expenseList = transactions.filter(
+      (t) => t.type === 'expense' || (t.type as any) === 'transfer_out' || (t.type as any) === 'p2p_out'
+    );
     if (expenseList.length === 0) return [];
 
     return expenseList.map((t) => {
+      const isTransferType = (t.type as any) === 'transfer_out' || (t.type as any) === 'p2p_out';
       const catObj = typeof t.categoryId === 'object' && t.categoryId ? (t.categoryId as any) : null;
-      const catName = catObj?.name || 'Chi tiêu';
+      const catName = catObj?.name || (isTransferType ? 'Chuyển tiền' : 'Chi tiêu');
       let icon = MoreHorizontal;
       let catKey = 'other';
-      const lower = (catName + ' ' + (t.note || '')).toLowerCase();
-      if (lower.includes('ăn') || lower.includes('uống') || lower.includes('cơm') || lower.includes('food')) {
-        icon = Utensils;
-        catKey = 'food';
-      } else if (lower.includes('mua') || lower.includes('sắm') || lower.includes('quần') || lower.includes('áo') || lower.includes('shop')) {
-        icon = ShoppingBag;
-        catKey = 'shopping';
-      } else if (lower.includes('xe') || lower.includes('taxi') || lower.includes('di chuyển') || lower.includes('xăng')) {
-        icon = Car;
-        catKey = 'transport';
-      } else if (lower.includes('phim') || lower.includes('giải trí') || lower.includes('game')) {
-        icon = Film;
-        catKey = 'entertainment';
+
+      if (isTransferType) {
+        // Giao dịch chuyển tiền P2P – dùng danh mục ảo "transfer"
+        icon = ArrowLeftRight;
+        catKey = 'transfer';
+      } else {
+        const lower = (catName + ' ' + (t.note || '')).toLowerCase();
+        if (lower.includes('ăn') || lower.includes('uống') || lower.includes('cơm') || lower.includes('food')) {
+          icon = Utensils;
+          catKey = 'food';
+        } else if (lower.includes('mua') || lower.includes('sắm') || lower.includes('quần') || lower.includes('áo') || lower.includes('shop')) {
+          icon = ShoppingBag;
+          catKey = 'shopping';
+        } else if (lower.includes('xe') || lower.includes('taxi') || lower.includes('di chuyển') || lower.includes('xăng')) {
+          icon = Car;
+          catKey = 'transport';
+        } else if (lower.includes('phim') || lower.includes('giải trí') || lower.includes('game')) {
+          icon = Film;
+          catKey = 'entertainment';
+        }
       }
 
       const txDate = t.transactionDate ? new Date(t.transactionDate) : new Date();

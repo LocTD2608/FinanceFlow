@@ -4,6 +4,9 @@ const Wallet = require('../models/Wallet');
 const { getPeriodRange } = require('../utils/period');
 
 const VALID_TYPES = ['expense', 'income'];
+// Các type được coi là thu nhập / chi tiêu khi tổng hợp
+const INCOME_TYPES = ['income', 'transfer_in', 'p2p_in'];
+const EXPENSE_TYPES = ['expense', 'transfer_out', 'p2p_out'];
 
 const round2 = (n) => Math.round(n * 100) / 100;
 
@@ -18,13 +21,13 @@ const resolveRange = (query) => {
   return { range };
 };
 
-// Tổng thu/chi trong khoảng [from, to). Loại giao dịch transfer, p2p.
+// Tổng thu/chi trong khoảng [from, to). Gộp transfer_in/p2p_in vào income, transfer_out/p2p_out vào expense.
 const sumByType = async (userId, from, to) => {
   const rows = await Transaction.aggregate([
     {
       $match: {
         userId: toObjectId(userId),
-        type: { $in: VALID_TYPES },
+        type: { $in: [...INCOME_TYPES, ...EXPENSE_TYPES] },
         transactionDate: { $gte: from, $lt: to },
       },
     },
@@ -32,7 +35,8 @@ const sumByType = async (userId, from, to) => {
   ]);
   const result = { income: 0, expense: 0 };
   rows.forEach((r) => {
-    result[r._id] = r.total;
+    if (INCOME_TYPES.includes(r._id)) result.income += r.total;
+    if (EXPENSE_TYPES.includes(r._id)) result.expense += r.total;
   });
   return result;
 };
@@ -113,7 +117,7 @@ exports.overview = async (req, res) => {
           {
             $match: {
               userId: toObjectId(userId),
-              type: 'expense',
+              type: { $in: EXPENSE_TYPES },
               transactionDate: { $gte: range.from, $lt: range.to },
             },
           },
@@ -192,11 +196,14 @@ exports.breakdown = async (req, res) => {
     const { range, error } = resolveRange(req.query);
     if (error) return res.status(400).json({ success: false, message: error });
 
+    // Lọc theo đúng nhóm type (vd: expense → ['expense','transfer_out','p2p_out'])
+    const typeFilter = type === 'expense' ? EXPENSE_TYPES : INCOME_TYPES;
+
     const rows = await Transaction.aggregate([
       {
         $match: {
           userId: toObjectId(req.user.id),
-          type,
+          type: { $in: typeFilter },
           transactionDate: { $gte: range.from, $lt: range.to },
         },
       },
@@ -205,6 +212,8 @@ exports.breakdown = async (req, res) => {
           _id: '$categoryId',
           amount: { $sum: '$amount' },
           transactionCount: { $sum: 1 },
+          // Lấy source để biết đây có phải P2P không
+          types: { $addToSet: '$type' },
         },
       },
       {
@@ -219,17 +228,23 @@ exports.breakdown = async (req, res) => {
       { $sort: { amount: -1 } },
     ]);
 
+    // Tổng bao gồm cả transfer (categoryId = null)
     const total = rows.reduce((sum, r) => sum + r.amount, 0);
-    const items = rows.map((r, index) => ({
-      rank: index + 1,
-      categoryId: r._id,
-      name: r.category ? r.category.name : 'Không xác định',
-      icon: r.category ? r.category.icon : 'circle',
-      color: r.category ? r.category.color : '#6B7280',
-      amount: r.amount,
-      percent: total > 0 ? round2((r.amount / total) * 100) : 0,
-      transactionCount: r.transactionCount,
-    }));
+    const items = rows.map((r, index) => {
+      // Giao dịch P2P không có categoryId → hiển thị danh mục ảo "Chuyển tiền"
+      const isTransfer = !r._id;
+      return {
+        rank: index + 1,
+        categoryId: r._id,
+        name: r.category ? r.category.name : 'Khác',
+        icon: r.category ? r.category.icon : 'circle',
+        color: r.category ? r.category.color : '#6B7280',
+        amount: r.amount,
+        percent: total > 0 ? round2((r.amount / total) * 100) : 0,
+        transactionCount: r.transactionCount,
+        isTransfer,
+      };
+    });
 
     return res.json({
       success: true,

@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE_URL as ROOT_API_URL } from './config';
 import { dispatchBalanceNotification } from '../services/socketService';
 
-export type TransactionType = 'expense' | 'income' | 'transfer';
+export type TransactionType = 'expense' | 'income' | 'transfer' | 'transfer_in' | 'transfer_out' | 'p2p_in' | 'p2p_out';
 
 export interface WalletRef {
   _id?: string;

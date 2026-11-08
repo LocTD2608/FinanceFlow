@@ -44,8 +44,13 @@ exports.getDailyReport = async (req, res) => {
     const endUtc = new Date(Date.UTC(year, monthNum, 1) - OFFSET_MS);
     const totalDays = new Date(year, monthNum, 0).getDate();
 
-    // Lọc giao dịch
-    const typeFilter = type === 'all' ? { $in: ['expense', 'income'] } : type;
+    // Lọc giao dịch – 'all' gộp cả income, expense và các loại transfer P2P
+    const typeFilter =
+      type === 'all'
+        ? { $in: ['expense', 'income', 'transfer_out', 'transfer_in', 'p2p_out', 'p2p_in'] }
+        : type === 'expense'
+        ? { $in: ['expense', 'transfer_out', 'p2p_out'] }
+        : { $in: ['income', 'transfer_in', 'p2p_in'] };
     const transactions = await Transaction.find({
       userId,
       type: typeFilter,

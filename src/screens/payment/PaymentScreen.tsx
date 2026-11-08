@@ -45,7 +45,7 @@ import { categoryApi, CategoryItemData } from '../../api/category';
 import { p2pApi, P2PRecipient } from '../../api/p2p';
 import { securityApi } from '../../api/security';
 import { soundService } from '../../services/soundService';
-import { dispatchBalanceNotification } from '../../services/socketService';
+import { dispatchBalanceNotification, initSocketConnection } from '../../services/socketService';
 
 import ScanQRTab from './ScanQRTab';
 import MyQRTab from './MyQRTab';
@@ -166,6 +166,24 @@ export default function PaymentScreen({
       }
     });
   }, [refreshWallet, token]);
+
+  // Khởi tạo Socket và lắng nghe biến động số dư realtime (dành cho user A đang chờ nhận tiền)
+  useEffect(() => {
+    if (!token) return;
+    const sock = initSocketConnection(token);
+    if (!sock) return;
+
+    const handleBalanceChange = () => {
+      // Làm mới số dư ví hiển thị trên màn QR của người nhận
+      refreshWallet();
+    };
+
+    sock.on('balance:change', handleBalanceChange);
+
+    return () => {
+      sock.off('balance:change', handleBalanceChange);
+    };
+  }, [token, refreshWallet]);
 
   const numericAmount = parseInt(amountStr.replace(/[^0-9]/g, '') || '0', 10);
   const walletBalance = wallet?.balance ?? 0;
@@ -479,10 +497,12 @@ export default function PaymentScreen({
 
       {/* STEP 2: Input & Recipient Confirmation Screen */}
       {step === 'input' && recipient && (
+        <View style={styles.inputStepWrapper}>
         <ScrollView
           style={styles.mainScroll}
           contentContainerStyle={styles.inputScrollContent}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
         >
           {/* Recipient Card */}
           <View style={styles.recipientCard}>
@@ -649,8 +669,10 @@ export default function PaymentScreen({
             />
             <Text style={styles.noteLengthText}>{note.length}/50 ký tự</Text>
           </View>
+        </ScrollView>
 
-          {/* Action Button */}
+        {/* Action Button - đặt ngoài ScrollView để không bị menu bar che */}
+        <View style={styles.stickyActionBar}>
           <TouchableOpacity
             style={[
               styles.primaryBtn,
@@ -664,7 +686,8 @@ export default function PaymentScreen({
               {isInsufficient ? 'Số dư ví không đủ' : 'Tiếp tục chuyển tiền'}
             </Text>
           </TouchableOpacity>
-        </ScrollView>
+        </View>
+        </View>
       )}
 
       {/* STEP 3: Success Receipt Screen */}
@@ -900,7 +923,22 @@ const styles = StyleSheet.create({
   },
   inputScrollContent: {
     padding: 16,
-    paddingBottom: 40,
+    paddingBottom: 16,
+    maxWidth: 440,
+    width: '100%',
+    alignSelf: 'center',
+  },
+  inputStepWrapper: {
+    flex: 1,
+    flexDirection: 'column',
+  },
+  stickyActionBar: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 90, // bottom tab bar ~54dp + bottom: 12 offset + safe area buffer
+    backgroundColor: '#f8fafc',
+    borderTopWidth: 1,
+    borderTopColor: '#e2e8f0',
     maxWidth: 440,
     width: '100%',
     alignSelf: 'center',
