@@ -205,6 +205,153 @@ const scanAllBudgets = async (now = new Date()) => {
   }
 };
 
+/**
+ * Quét các mục tiêu tiết kiệm active và gửi lời nhắc cận hạn hoặc ngày nhận lương (KAN-33)
+ */
+const scanSavingsReminders = async (now = new Date()) => {
+  try {
+    const currentMonth = toMonthStr(now);
+    const vnNow = new Date(new Date(now).getTime() + VN_OFFSET_MS);
+    const currentDay = vnNow.getUTCDate();
+
+    const goals = await Goal.find({ status: 'active' }).populate('userId', 'salaryDay');
+    let sent = 0;
+
+    for (const goal of goals) {
+      try {
+        if (!goal || goal.currentAmount >= goal.targetAmount) continue;
+
+        const user = goal.userId;
+        const uid = user?._id || user;
+        if (!uid) continue;
+
+        // 1. Nhánh kiểm tra cận hạn chót (Deadline)
+        if (goal.deadline) {
+          const diff = dayDiff(goal.deadline, now);
+          let stage = null;
+          if (diff === 7) stage = 'd-7';
+          else if (diff === 3) stage = 'd-3';
+          else if (diff === 0) stage = 'd0';
+
+          if (stage && !(goal.notifiedStages || []).includes(stage)) {
+            const claimed = await Goal.findOneAndUpdate(
+              { _id: goal._id, status: 'active', notifiedStages: { $ne: stage } },
+              { $addToSet: { notifiedStages: stage } },
+              { new: true }
+            );
+
+            if (claimed) {
+              const remaining = Math.max(0, goal.targetAmount - goal.currentAmount);
+              const remainingStr = `${Number(remaining).toLocaleString('vi-VN')} đ`;
+
+              let title = 'Nhắc nhở mục tiêu tiết kiệm';
+              let body = '';
+              if (stage === 'd-7') {
+                body = `Còn 7 ngày đến hạn mục tiêu "${goal.name}". Bạn còn thiếu ${remainingStr} để hoàn thành mục tiêu.`;
+              } else if (stage === 'd-3') {
+                body = `Chỉ còn 3 ngày đến hạn hoàn thành mục tiêu "${goal.name}"! Còn thiếu ${remainingStr}.`;
+              } else {
+                body = `Hôm nay là ngày đến hạn mục tiêu "${goal.name}"! Còn thiếu ${remainingStr}.`;
+              }
+
+              try {
+                await pushService.sendToUser(uid, {
+                  title,
+                  body,
+                  data: {
+                    type: 'savings_reminder',
+                    goalId: String(goal._id),
+                    stage,
+                    diff,
+                  },
+                });
+              } catch (pushErr) {
+                console.error('[financialAlert] Gửi push savings deadline lỗi:', pushErr.message);
+              }
+
+              try {
+                realtimeService.emitFinancialAlert(uid, {
+                  type: 'savings_reminder',
+                  level: stage === 'd0' ? 'warning' : 'info',
+                  title,
+                  body,
+                  data: {
+                    goalId: String(goal._id),
+                    stage,
+                    diff,
+                    currentAmount: goal.currentAmount,
+                    targetAmount: goal.targetAmount,
+                  },
+                });
+              } catch (rtErr) {
+                console.error('[financialAlert] Phát realtime savings deadline lỗi:', rtErr.message);
+              }
+
+              sent += 1;
+              continue;
+            }
+          }
+        }
+
+        // 2. Nhánh kiểm tra ngày nhận lương (Salary Day)
+        const userSalaryDay = (user && typeof user.salaryDay === 'number') ? user.salaryDay : 5;
+        if (currentDay === userSalaryDay && goal.lastSalaryReminderMonth !== currentMonth) {
+          const claimed = await Goal.findOneAndUpdate(
+            { _id: goal._id, status: 'active', lastSalaryReminderMonth: { $ne: currentMonth } },
+            { $set: { lastSalaryReminderMonth: currentMonth } },
+            { new: true }
+          );
+
+          if (claimed) {
+            const title = 'Nhắc nhở tiết kiệm ngày nhận lương';
+            const body = `Hôm nay là ngày nhận lương! Đừng quên trích một phần để tiếp tục tích lũy cho mục tiêu "${goal.name}".`;
+
+            try {
+              await pushService.sendToUser(uid, {
+                title,
+                body,
+                data: {
+                  type: 'savings_reminder',
+                  goalId: String(goal._id),
+                  stage: 'salary_day',
+                },
+              });
+            } catch (pushErr) {
+              console.error('[financialAlert] Gửi push savings salaryDay lỗi:', pushErr.message);
+            }
+
+            try {
+              realtimeService.emitFinancialAlert(uid, {
+                type: 'savings_reminder',
+                level: 'success',
+                title,
+                body,
+                data: {
+                  goalId: String(goal._id),
+                  stage: 'salary_day',
+                  currentAmount: goal.currentAmount,
+                  targetAmount: goal.targetAmount,
+                },
+              });
+            } catch (rtErr) {
+              console.error('[financialAlert] Phát realtime savings salaryDay lỗi:', rtErr.message);
+            }
+
+            sent += 1;
+          }
+        }
+      } catch (goalErr) {
+        console.error(`[financialAlert] Xử lý goal ${goal._id} lỗi:`, goalErr.message);
+      }
+    }
+
+    return sent;
+  } catch (err) {
+    console.error('[financialAlert] scanSavingsReminders lỗi:', err.message);
+    return 0;
+  }
+};
+
 module.exports = {
   toMonthStr,
   dayDiff,
@@ -212,4 +359,5 @@ module.exports = {
   evaluateBudget,
   checkExpenseBudget,
   scanAllBudgets,
+  scanSavingsReminders,
 };
