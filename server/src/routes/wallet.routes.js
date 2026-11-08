@@ -11,6 +11,8 @@ router.get('/default', ctrl.getDefault);
 router.get('/suggest-account', ctrl.suggestAccount);
 router.post('/check-account', ctrl.checkAccount);
 router.post('/', ctrl.create);
+router.get('/:id/detail', ctrl.getWalletDetail);
+router.get('/:id/transactions', ctrl.getWalletTransactions);
 router.get('/:id', ctrl.getById);
 router.patch('/:id', ctrl.update);
 router.post('/:id/set-account', ctrl.setAccount);

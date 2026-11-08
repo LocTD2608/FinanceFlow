@@ -547,3 +547,183 @@ exports.setAccount = async (req, res) => {
     return res.status(500).json({ success: false, message: 'Lỗi server: ' + error.message });
   }
 };
+
+
+/**
+ * GET /api/wallets/:id/detail
+ * Trả về thông tin chi tiết ví kèm thống kê tổng thu/chi/số lượng giao dịch toàn lịch sử.
+ */
+exports.getWalletDetail = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+    if (!isValidId(id)) return fail(res, 400, 'ID ví không hợp lệ.');
+
+    const wallet = await Wallet.findOne({ _id: id, userId, isArchived: { $ne: true } }).lean();
+    if (!wallet) return fail(res, 404, 'Không tìm thấy ví.');
+
+    const walletObjId = new mongoose.Types.ObjectId(id);
+    const userObjId = new mongoose.Types.ObjectId(userId);
+
+    // Tính tổng thu/chi toàn lịch sử theo ví
+    const statsAgg = await Transaction.aggregate([
+      {
+        $match: {
+          userId: userObjId,
+          $or: [{ walletId: walletObjId }, { destinationWalletId: walletObjId }],
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalIncome: {
+            $sum: {
+              $cond: [
+                {
+                  $or: [
+                    // Thu trực tiếp vào ví
+                    { $and: [{ $in: ['$type', ['income', 'p2p_in', 'transfer_in']] }, { $eq: ['$walletId', walletObjId] }] },
+                    // Transfer_out từ ví khác đến ví này
+                    { $and: [{ $in: ['$type', ['transfer', 'transfer_out']] }, { $eq: ['$destinationWalletId', walletObjId] }] },
+                  ],
+                },
+                '$amount',
+                0,
+              ],
+            },
+          },
+          totalExpense: {
+            $sum: {
+              $cond: [
+                {
+                  $or: [
+                    // Chi trực tiếp từ ví
+                    { $and: [{ $in: ['$type', ['expense', 'p2p_out', 'transfer_out']] }, { $eq: ['$walletId', walletObjId] }] },
+                    // Transfer_in đến ví khác (tức ví này bị trừ)
+                    { $and: [{ $in: ['$type', ['transfer', 'transfer_in']] }, { $eq: ['$walletId', walletObjId] }] },
+                  ],
+                },
+                '$amount',
+                0,
+              ],
+            },
+          },
+          transactionCount: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const stats = statsAgg[0]
+      ? {
+          totalIncome: statsAgg[0].totalIncome || 0,
+          totalExpense: statsAgg[0].totalExpense || 0,
+          transactionCount: statsAgg[0].transactionCount || 0,
+        }
+      : { totalIncome: 0, totalExpense: 0, transactionCount: 0 };
+
+    return res.json({ success: true, data: { ...wallet, stats } });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Lỗi server: ' + error.message });
+  }
+};
+
+/**
+ * GET /api/wallets/:id/transactions
+ * Lịch sử giao dịch của 1 ví cụ thể. Hỗ trợ filter + phân trang + summary thu/chi trong khoảng filter.
+ * Query: page, limit, month (YYYY-MM), type, startDate, endDate
+ */
+exports.getWalletTransactions = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+    if (!isValidId(id)) return fail(res, 400, 'ID ví không hợp lệ.');
+
+    const wallet = await Wallet.findOne({ _id: id, userId, isArchived: { $ne: true } }).lean();
+    if (!wallet) return fail(res, 404, 'Không tìm thấy ví.');
+
+    const walletObjId = new mongoose.Types.ObjectId(id);
+    const userObjId = new mongoose.Types.ObjectId(userId);
+    const { type, month, startDate, endDate, page = 1, limit = 20 } = req.query;
+
+    // Base filter: giao dịch liên quan đến ví (gửi hoặc nhận)
+    const baseFilter = {
+      userId: userObjId,
+      $or: [{ walletId: walletObjId }, { destinationWalletId: walletObjId }],
+    };
+
+    // Lọc theo loại giao dịch
+    if (type) {
+      const VALID = ['expense', 'income', 'transfer', 'transfer_in', 'transfer_out', 'p2p_in', 'p2p_out'];
+      if (VALID.includes(type)) baseFilter.type = type;
+    }
+
+    // Lọc theo tháng YYYY-MM
+    if (month && /^\d{4}-\d{2}$/.test(month)) {
+      const [year, m] = month.split('-').map(Number);
+      const start = new Date(Date.UTC(year, m - 1, 1, 0, 0, 0));
+      const end = new Date(Date.UTC(year, m, 0, 23, 59, 59, 999));
+      baseFilter.transactionDate = { $gte: start, $lte: end };
+    } else if (startDate || endDate) {
+      baseFilter.transactionDate = {};
+      if (startDate) baseFilter.transactionDate.$gte = new Date(startDate);
+      if (endDate) baseFilter.transactionDate.$lte = new Date(endDate);
+    }
+
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+    const skip = (pageNum - 1) * limitNum;
+
+    // Chạy song song: đếm tổng, lấy danh sách, tính summary
+    const [total, transactions, summaryAgg] = await Promise.all([
+      Transaction.countDocuments(baseFilter),
+      Transaction.find(baseFilter)
+        .sort({ transactionDate: -1, createdAt: -1 })
+        .skip(skip)
+        .limit(limitNum)
+        .populate('walletId', 'name type currency accountNumber bankName')
+        .populate('destinationWalletId', 'name type currency accountNumber bankName')
+        .populate('categoryId', 'name icon color type')
+        .lean(),
+      Transaction.aggregate([
+        { $match: baseFilter },
+        {
+          $group: {
+            _id: null,
+            totalIncome: {
+              $sum: {
+                $cond: [{ $in: ['$type', ['income', 'transfer_in', 'p2p_in']] }, '$amount', 0],
+              },
+            },
+            totalExpense: {
+              $sum: {
+                $cond: [{ $in: ['$type', ['expense', 'transfer_out', 'p2p_out']] }, '$amount', 0],
+              },
+            },
+          },
+        },
+      ]),
+    ]);
+
+    const summary = summaryAgg[0]
+      ? {
+          totalIncome: summaryAgg[0].totalIncome || 0,
+          totalExpense: summaryAgg[0].totalExpense || 0,
+          netCashFlow: (summaryAgg[0].totalIncome || 0) - (summaryAgg[0].totalExpense || 0),
+        }
+      : { totalIncome: 0, totalExpense: 0, netCashFlow: 0 };
+
+    return res.json({
+      success: true,
+      data: transactions,
+      summary,
+      pagination: {
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum) || 1,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Lỗi server: ' + error.message });
+  }
+};

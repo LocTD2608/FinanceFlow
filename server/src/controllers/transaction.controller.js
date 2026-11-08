@@ -227,8 +227,8 @@ exports.getById = async (req, res) => {
     }
 
     const transaction = await Transaction.findOne({ _id: id, userId: req.user.id })
-      .populate('walletId', 'name type currency')
-      .populate('destinationWalletId', 'name type currency')
+      .populate('walletId', 'name type currency accountNumber bankName')
+      .populate('destinationWalletId', 'name type currency accountNumber bankName')
       .populate('categoryId', 'name icon color type')
       .lean();
 
