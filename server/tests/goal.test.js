@@ -270,21 +270,21 @@ describe('Goal Controller', () => {
         expect.objectContaining({
           success: true,
           data: expect.objectContaining({
-            penaltyFee: 500000, // 5% của 10tr
-            refundAmount: 9500000, // 95% của 10tr
+            penaltyFee: 0,       // Không phạt phí
+            refundAmount: 10000000, // Hoàn 100%
           }),
         })
       );
 
-      // Đã cộng 9.500.000 vào ví
+      // Đã cộng 10.000.000 vào ví (100%)
       expect(Wallet.findByIdAndUpdate).toHaveBeenCalledWith(
         WALLET_ID,
-        { $inc: { balance: 9500000 } },
+        { $inc: { balance: 10000000 } },
         expect.anything()
       );
       expect(mockGoalDoc.status).toBe('cancelled');
-      expect(mockGoalDoc.penaltyFee).toBe(500000);
-      expect(mockGoalDoc.refundAmount).toBe(9500000);
+      expect(mockGoalDoc.penaltyFee).toBe(0);
+      expect(mockGoalDoc.refundAmount).toBe(10000000);
     });
   });
 });

@@ -79,14 +79,18 @@ describe('summary', () => {
     expect(data.comparison.expense.changePercent).toBe(-22.5);
   });
 
-  it('chỉ tính income/expense (bỏ transfer) và ví chưa archived, không bị loại net worth', async () => {
+  it('tính tất cả type income/expense/p2p/transfer và ví chưa archived, không bị loại net worth', async () => {
     Transaction.aggregate.mockResolvedValue([]);
     Wallet.aggregate.mockResolvedValue([]);
     await ctrl.summary(mockReq(), mockRes());
 
     const txMatch = Transaction.aggregate.mock.calls[0][0][0].$match;
-    expect([...txMatch.type.$in].sort()).toEqual(['expense', 'income']);
-    expect(txMatch.type.$in).not.toContain('transfer');
+    // Dashboard summary tính cả p2p_in, p2p_out, transfer_in, transfer_out ngoài income/expense
+    expect(txMatch.type.$in).toContain('income');
+    expect(txMatch.type.$in).toContain('expense');
+    expect(txMatch.type.$in).toContain('p2p_in');
+    expect(txMatch.type.$in).toContain('p2p_out');
+    expect(txMatch.type.$in).not.toContain('transfer'); // 'transfer' gốc không được include
     const walletMatch = Wallet.aggregate.mock.calls[0][0][0].$match;
     expect(walletMatch.isArchived).toBe(false);
     expect(walletMatch.isExcludedFromNetWorth).toBe(false);
@@ -139,7 +143,8 @@ describe('breakdown', () => {
     expect(sum).toBeCloseTo(100, 1);
 
     const match = Transaction.aggregate.mock.calls[0][0][0].$match;
-    expect(match.type).toBe('expense');
+    // breakdown dùng $in array cho expense types (expense, transfer_out, p2p_out)
+    expect(match.type.$in).toContain('expense');
     expect(Transaction.aggregate.mock.calls[0][0].some((s) => s.$sort)).toBe(true);
   });
 
@@ -147,6 +152,6 @@ describe('breakdown', () => {
     Transaction.aggregate.mockResolvedValue([{ _id: 'gone', amount: 500 }]);
     const res = mockRes();
     await ctrl.breakdown(mockReq({ type: 'income' }), res);
-    expect(body(res).data.items[0].name).toBe('Không xác định');
+    expect(body(res).data.items[0].name).toBe('Khác');
   });
 });

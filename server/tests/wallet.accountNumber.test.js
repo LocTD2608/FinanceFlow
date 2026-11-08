@@ -43,12 +43,8 @@ beforeEach(() => {
 });
 
 describe('Wallet Controller - Account Number & CRUD', () => {
-  test('Tạo ví không truyền STK: tự động sinh STK 10 chữ số', async () => {
-    // Mock check trùng trong generateAccountNumber -> null
-    Wallet.findOne.mockReturnValue({
-      session: jest.fn().mockReturnThis(),
-      lean: jest.fn().mockResolvedValue(null),
-    });
+  test('Tạo ví không truyền STK: accountNumber để null (user tự chọn sau qua AccountSetupModal)', async () => {
+    Wallet.findOne.mockResolvedValue(null);
     Wallet.create.mockImplementation((doc) => Promise.resolve({ _id: WALLET_ID, ...doc }));
 
     const res = mockRes();
@@ -56,7 +52,8 @@ describe('Wallet Controller - Account Number & CRUD', () => {
 
     expect(res.status).toHaveBeenCalledWith(201);
     const createdCall = Wallet.create.mock.calls[0][0];
-    expect(createdCall.accountNumber).toMatch(/^\d{10}$/);
+    // Không tự sinh STK — để null, user sẽ chọn qua AccountSetupModal
+    expect(createdCall.accountNumber).toBeNull();
   });
 
   test('Tạo ví truyền STK không đúng 10 chữ số -> 400', async () => {

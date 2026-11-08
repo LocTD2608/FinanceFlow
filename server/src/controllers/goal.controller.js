@@ -411,7 +411,7 @@ exports.contribute = async (req, res) => {
 
 /**
  * POST /api/goals/:id/cancel
- * Hủy mục tiêu tài chính: Phạt phí 5%, hoàn 95% tiền đã tiết kiệm về số dư ví.
+ * Hủy mục tiêu tài chính: Hoàn 100% tiền đã tiết kiệm về số dư ví, không phạt phí.
  */
 exports.cancel = async (req, res) => {
   try {
@@ -434,25 +434,20 @@ exports.cancel = async (req, res) => {
 
       const totalSaved = goal.currentAmount || 0;
 
-      // Nếu chưa tiết kiệm được đồng nào
+      // Nếu chưa tiết kiệm được đồng nào → hủy ngay, không cần tạo transaction
       if (totalSaved === 0) {
         goal.status = 'cancelled';
         goal.cancelledAt = new Date();
         goal.penaltyFee = 0;
         goal.refundAmount = 0;
         await goal.save({ session });
-        return {
-          goal,
-          penaltyFee: 0,
-          refundAmount: 0,
-        };
+        return { goal, penaltyFee: 0, refundAmount: 0 };
       }
 
-      // Có tiền tiết kiệm: phạt 5%, hoàn 95%
-      const penaltyFee = Math.round(totalSaved * 0.05);
-      const refundAmount = totalSaved - penaltyFee;
+      // Hoàn 100% — không phạt phí
+      const refundAmount = totalSaved;
 
-      // Xác định ví hoàn tiền
+      // Xác định ví hoàn tiền (ưu tiên targetWalletId, fallback ví mặc định)
       let targetWallet = null;
       if (goal.targetWalletId) {
         targetWallet = await Wallet.findOne({
@@ -462,10 +457,7 @@ exports.cancel = async (req, res) => {
         }).session(session);
       }
       if (!targetWallet) {
-        targetWallet = await Wallet.findOne({
-          userId,
-          isArchived: { $ne: true },
-        })
+        targetWallet = await Wallet.findOne({ userId, isArchived: { $ne: true } })
           .sort({ createdAt: 1 })
           .session(session);
       }
@@ -476,24 +468,20 @@ exports.cancel = async (req, res) => {
         throw err;
       }
 
-      // Cộng 95% vào ví
-      await Wallet.findByIdAndUpdate(
+      // Cộng 100% vào ví
+      const updatedWallet = await Wallet.findByIdAndUpdate(
         targetWallet._id,
         { $inc: { balance: refundAmount } },
-        { session }
+        { session, new: true }
       );
 
-      // Danh mục thu
-      let incomeCat = await Category.findOne({
-        type: 'income',
-        name: 'Khác (Thu)',
-      }).session(session);
-
+      // Tìm danh mục thu
+      let incomeCat = await Category.findOne({ type: 'income', name: 'Khác (Thu)' }).session(session);
       if (!incomeCat) {
         incomeCat = await Category.findOne({ type: 'income', isDefault: true }).session(session);
       }
 
-      // Tạo giao dịch thu hoàn tiền 95%
+      // Tạo giao dịch thu hoàn tiền 100%
       await Transaction.create(
         [
           {
@@ -504,7 +492,7 @@ exports.cancel = async (req, res) => {
             type: 'income',
             source: 'goal',
             goalId: goal._id,
-            note: `Hoàn trả tiền cho mục tiêu "${goal.name}" đã bị hủy`,
+            note: `Hoàn trả 100% tiền khi hủy mục tiêu "${goal.name}"`,
             transactionDate: new Date(),
           },
         ],
@@ -513,23 +501,24 @@ exports.cancel = async (req, res) => {
 
       goal.status = 'cancelled';
       goal.cancelledAt = new Date();
-      goal.penaltyFee = penaltyFee;
+      goal.penaltyFee = 0;
       goal.refundAmount = refundAmount;
       await goal.save({ session });
 
       return {
         goal,
-        penaltyFee,
+        penaltyFee: 0,
         refundAmount,
-        refundWallet: targetWallet,
+        refundWallet: updatedWallet,
       };
     });
 
-    return res.json({
-      success: true,
-      message: `Đã hủy mục tiêu. Phí hủy 5% (${result.penaltyFee.toLocaleString('vi-VN')} đ), số tiền hoàn trả 95% (${result.refundAmount.toLocaleString('vi-VN')} đ) đã được chuyển về ví.`,
-      data: result,
-    });
+    const msg =
+      result.refundAmount > 0
+        ? `Đã hủy mục tiêu. Toàn bộ ${result.refundAmount.toLocaleString('vi-VN')}đ đã được hoàn trả 100% về ví.`
+        : 'Đã hủy mục tiêu.';
+
+    return res.json({ success: true, message: msg, data: result });
   } catch (error) {
     const status = error.status || 500;
     return res.status(status).json({ success: false, message: error.message });
@@ -552,6 +541,162 @@ exports.listContributions = async (req, res) => {
       .lean();
 
     return res.json({ success: true, data: contributions });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Lỗi server: ' + error.message });
+  }
+};
+
+
+/**
+ * POST /api/goals/:id/withdraw
+ * Rút tiền khỏi mục tiêu: User nhập số tiền muốn rút (> 0 và <= currentAmount).
+ * Atomic: cộng tiền vào ví + trừ currentAmount mục tiêu + ghi lịch sử.
+ */
+exports.withdraw = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+    const { amount, walletId, note } = req.body || {};
+
+    if (!isValidId(id)) return fail(res, 400, 'ID mục tiêu không hợp lệ.');
+    if (!walletId || !isValidId(walletId)) return fail(res, 400, 'ID ví nhận tiền không hợp lệ.');
+
+    const numericAmount = Number(amount);
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+      return fail(res, 400, 'Số tiền rút phải lớn hơn 0.');
+    }
+
+    const result = await runInTransaction(async (session) => {
+      // 1. Kiểm tra mục tiêu
+      const goal = await Goal.findOne({ _id: id, userId }).session(session);
+      if (!goal) {
+        const err = new Error('Không tìm thấy mục tiêu tài chính.');
+        err.status = 404;
+        throw err;
+      }
+      if (goal.status !== 'active') {
+        const err = new Error('Chỉ có thể rút tiền từ mục tiêu đang hoạt động.');
+        err.status = 400;
+        throw err;
+      }
+      if (numericAmount > goal.currentAmount) {
+        const err = new Error(
+          `Số tiền rút (${numericAmount.toLocaleString('vi-VN')}đ) vượt quá số tiền đã tiết kiệm (${goal.currentAmount.toLocaleString('vi-VN')}đ).`
+        );
+        err.status = 400;
+        throw err;
+      }
+
+      // 2. Kiểm tra ví nhận
+      const wallet = await Wallet.findOne({
+        _id: walletId,
+        userId,
+        isArchived: { $ne: true },
+      }).session(session);
+      if (!wallet) {
+        const err = new Error('Ví nhận tiền không tồn tại.');
+        err.status = 404;
+        throw err;
+      }
+
+      // 3. Cộng tiền vào ví
+      const updatedWallet = await Wallet.findByIdAndUpdate(
+        wallet._id,
+        { $inc: { balance: numericAmount } },
+        { session, new: true }
+      );
+
+      // 4. Trừ currentAmount của mục tiêu
+      goal.currentAmount -= numericAmount;
+      await goal.save({ session });
+
+      // 5. Tìm danh mục thu để ghi transaction
+      let incomeCat = await Category.findOne({ type: 'income', name: 'Khác (Thu)' }).session(session);
+      if (!incomeCat) {
+        incomeCat = await Category.findOne({ type: 'income', isDefault: true }).session(session);
+      }
+
+      // 6. Ghi transaction thu (tiền về ví)
+      const [tx] = await Transaction.create(
+        [
+          {
+            userId,
+            walletId: wallet._id,
+            categoryId: incomeCat ? incomeCat._id : undefined,
+            amount: numericAmount,
+            type: 'income',
+            source: 'goal',
+            goalId: goal._id,
+            note: note ? note.trim() : `Rút tiền từ mục tiêu: ${goal.name}`,
+            transactionDate: new Date(),
+          },
+        ],
+        { session }
+      );
+
+      // 7. Ghi lịch sử GoalContribution (amount âm = rút)
+      await GoalContribution.create(
+        [
+          {
+            goalId: goal._id,
+            userId,
+            walletId: wallet._id,
+            transactionId: tx._id,
+            amount: -numericAmount,
+            note: note ? note.trim() : `Rút tiền từ mục tiêu`,
+            date: new Date(),
+          },
+        ],
+        { session }
+      );
+
+      return {
+        goal,
+        withdrawn: numericAmount,
+        newWalletBalance: updatedWallet.balance,
+      };
+    });
+
+    return res.json({
+      success: true,
+      message: `Đã rút ${result.withdrawn.toLocaleString('vi-VN')}đ từ mục tiêu về ví thành công!`,
+      data: result,
+    });
+  } catch (error) {
+    const status = error.status || 500;
+    return res.status(status).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * DELETE /api/goals/:id
+ * Xóa mục tiêu tài chính (chỉ được xóa khi status = 'cancelled' hoặc 'completed').
+ * Xóa luôn các GoalContribution liên quan.
+ */
+exports.remove = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+    if (!isValidId(id)) return fail(res, 400, 'ID mục tiêu không hợp lệ.');
+
+    const goal = await Goal.findOne({ _id: id, userId });
+    if (!goal) return fail(res, 404, 'Không tìm thấy mục tiêu tài chính.');
+
+    if (goal.status === 'active') {
+      return fail(
+        res,
+        400,
+        'Không thể xóa mục tiêu đang hoạt động. Vui lòng hủy mục tiêu trước khi xóa.'
+      );
+    }
+
+    // Xóa lịch sử đóng góp liên quan
+    await GoalContribution.deleteMany({ goalId: goal._id });
+
+    // Xóa mục tiêu
+    await Goal.deleteOne({ _id: goal._id });
+
+    return res.json({ success: true, message: 'Đã xóa mục tiêu thành công.' });
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Lỗi server: ' + error.message });
   }
