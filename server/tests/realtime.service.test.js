@@ -41,4 +41,36 @@ describe('Realtime Service emitBalanceChange', () => {
       realtimeService.emitBalanceChange('u_123', { amount: 100 });
     }).not.toThrow();
   });
+
+  describe('emitFinancialAlert (KAN-33)', () => {
+    it('phát sự kiện financial:alert tới room user với payload đầy đủ', () => {
+      const alertData = {
+        type: 'budget_alert',
+        level: 'danger',
+        title: 'Cảnh báo vượt ngân sách',
+        body: 'Bạn đã chi tiêu đạt 100% hạn mức danh mục Ăn uống',
+        data: { budgetId: 'b_123', threshold: 100 },
+      };
+
+      realtimeService.emitFinancialAlert('u_456', alertData);
+
+      expect(ioMock.to).toHaveBeenCalledWith('user_u_456');
+      expect(ioMock.emit).toHaveBeenCalledWith('financial:alert', expect.objectContaining({
+        id: expect.any(String),
+        type: 'budget_alert',
+        level: 'danger',
+        title: 'Cảnh báo vượt ngân sách',
+        body: 'Bạn đã chi tiêu đạt 100% hạn mức danh mục Ăn uống',
+        data: { budgetId: 'b_123', threshold: 100 },
+        timestamp: expect.any(String),
+      }));
+    });
+
+    it('không ném lỗi khi socket io là null', () => {
+      require('../src/socket').getIO.mockReturnValue(null);
+      expect(() => {
+        realtimeService.emitFinancialAlert('u_456', { title: 'Test' });
+      }).not.toThrow();
+    });
+  });
 });
