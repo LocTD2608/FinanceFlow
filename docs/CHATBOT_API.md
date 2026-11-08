@@ -5,7 +5,7 @@
 Backend Node >= 20 (đã kiểm thử Node 24), Express/Mongoose. Không cần SDK AI runtime: gọi Gemini REST bằng native fetch. Cài `npm ci` trong `server`, cấu hình `server/.env` theo `.env.example`, rồi `npm start` trong `server`.
 
 - `GEMINI_API_KEY`: khóa của Google AI Studio, chỉ trên backend. Không đưa vào Git hoặc `EXPO_PUBLIC_*`.
-- `GEMINI_MODEL`: tên model hỗ trợ function calling. Ví dụ `gemini-2.5-flash`, được tài liệu Google liệt kê là stable tại thời điểm khảo sát; kiểm tra model còn khả dụng cho project khi triển khai. Model không khả dụng trả lỗi upstream, không âm thầm đổi model.
+- `GEMINI_MODEL`: tên model hỗ trợ function calling. Cấu hình mẫu là `gemini-3.1-flash-lite`, đã kiểm tra trả lời và gọi công cụ thật ngày 2026-11-08. Project hiện tại bị từ chối khi gọi `gemini-2.5-flash`; model `gemini-3.8-flash` vượt timeout trong lần kiểm tra. Khả dụng/quota tùy project, hãy chạy `chat:check` sau khi cấu hình. Backend không âm thầm đổi model.
 - `MONGODB_URI`: dùng MongoDB Atlas hoặc replica set để xác nhận thao tác. MongoDB standalone chỉ dùng hỏi đáp/bản nháp, xác nhận trả `503 TRANSACTION_UNSUPPORTED`.
 - `JWT_SECRET`: dùng cấu hình xác thực hiện có; đăng nhập lấy bearer token.
 
@@ -101,7 +101,7 @@ Lỗi chat: `{success:false,code,message,requestId}`. Middleware JWT hiện có 
 | 410 | ACTION_EXPIRED | Tạo và kiểm tra lại bản nháp |
 | 429 | CHAT_RATE_LIMIT, AI_RATE_LIMIT | Đợi theo Retry-After |
 | 502 | AI_INVALID_RESPONSE, AI_INVALID_TOOL, AI_TOOL_LIMIT | Thử lại hoặc hỏi cụ thể hơn |
-| 503 | AI_NOT_CONFIGURED, AI_UNAVAILABLE, AUTH_UNAVAILABLE, TRANSACTION_UNSUPPORTED | Kiểm tra cấu hình/dịch vụ; không tự retry ghi bằng ID mới |
+| 503 | AI_NOT_CONFIGURED, AI_MODEL_UNAVAILABLE, AI_UNAVAILABLE, AUTH_UNAVAILABLE, TRANSACTION_UNSUPPORTED | Kiểm tra cấu hình/dịch vụ; không tự retry ghi bằng ID mới |
 | 504 | AI_TIMEOUT | Thử lại câu hỏi |
 
 ## Kiểm thử
@@ -111,5 +111,15 @@ npm test --prefix server -- --runInBand
 npm test -- --runInBand
 npm run type-check
 ```
+
+Kiểm tra kết nối thật, chạy riêng khi đã điền `server/.env`:
+
+```sh
+npm run chat:check --prefix server
+```
+
+Lệnh dùng cùng Gemini transport/tool như backend, kiểm tra một vòng gọi `app_guide` và trả lời cuối. MongoDB chỉ ping và thử transaction đọc rồi abort; không tạo tài khoản, hội thoại, ví hoặc giao dịch. Kết quả JSON phải có `ok:true` cho cả `mongodb` và `gemini`, exit code 0. Không in API key, URI, dữ liệu tài chính hoặc nội dung người dùng. Lệnh này có dùng quota Gemini; không tự chạy trong CI. File `.env` phải nằm trong thư mục `server` của đúng checkout/worktree đang khởi chạy; không tự đọc `.env` từ checkout khác.
+
+`server/tests/chat.e2e.test.js` đi qua JWT thật, router, service, tools và MongoDB replica set tạm, chỉ giả lập Gemini để ổn định test: hướng dẫn, thu/chi, ngân sách, thống kê/gợi ý, xác nhận, retry và quyền sở hữu. Test kiểm tra đủ 10 tin/phút qua cả router và service để tránh tính quota hai lần. Dữ liệu chỉ là tài khoản/ví giả trong database tạm.
 
 `server/tests/chat.integration.test.js` dùng mongodb-memory-server khởi tạo replica set tạm, không kết nối database ứng dụng và không cần Docker. Lần đầu cần mạng để tải MongoDB 7.0.14 (Windows khoảng 592 MB); các lần sau dùng cache. Kiểm thử xác nhận đồng thời, rollback, quyền sở hữu, hết hạn, số dư và trùng ngân sách trên MongoDB thật. Gemini transport và hội thoại dùng mock, không tiêu tốn quota thật. Muốn smoke test live: cấu hình khóa/model, đăng nhập, gọi `/messages` để hỏi hướng dẫn trước; không dùng tài khoản hoặc ví sản xuất để thử ghi.

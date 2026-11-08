@@ -8,6 +8,7 @@
     "dev": "node --watch src/index.js",
     "seed": "node src/seeds/index.js",
     "db:sync": "node src/scripts/dbSync.js",
+    "chat:check": "node src/scripts/chatCheck.js",
     "migrate:rename-categories": "node src/seeds/rename-income-categories.js",
     "test": "jest"
   },

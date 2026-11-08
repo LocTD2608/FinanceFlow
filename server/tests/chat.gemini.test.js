@@ -18,6 +18,10 @@ test.each([429, 500, 403])('sanitizes upstream status %s', async status => {
   global.fetch = jest.fn().mockResolvedValue(new Response('test-secret', { status }));
   await expect(generate([], new AbortController().signal)).rejects.toMatchObject({ status: status === 429 ? 429 : 503 });
 });
+test('model not found identifies server model configuration without exposing upstream body', async () => {
+  global.fetch = jest.fn().mockResolvedValue(new Response('test-secret', { status: 404 }));
+  await expect(generate([], new AbortController().signal)).rejects.toMatchObject({ status: 503, code: 'AI_MODEL_UNAVAILABLE' });
+});
 test('rejects empty, truncated and malformed responses', async () => {
   for (const body of [{}, { candidates: [{ finishReason: 'MAX_TOKENS', content: { parts: [{ text: 'half' }] } }] }]) {
     global.fetch = jest.fn().mockResolvedValue(response(body));

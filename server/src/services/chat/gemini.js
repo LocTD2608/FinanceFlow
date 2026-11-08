@@ -27,6 +27,7 @@ Trạng thái hiện tại do server cung cấp: ${context}` }] },
     });
     if (!res.ok) {
       await res.body?.cancel();
+      if (res.status === 404) throw new ChatError(503, 'AI_MODEL_UNAVAILABLE', 'Model Gemini không khả dụng. Vui lòng kiểm tra GEMINI_MODEL trên máy chủ.');
       throw new ChatError(res.status === 429 ? 429 : 503, res.status === 429 ? 'AI_RATE_LIMIT' : 'AI_UNAVAILABLE', 'Dịch vụ AI tạm thời không khả dụng. Vui lòng thử lại sau.');
     }
     const reader = res.body.getReader();
