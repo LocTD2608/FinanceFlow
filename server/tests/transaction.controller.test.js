@@ -26,9 +26,14 @@ jest.mock('../src/models/Category', () => ({
   findOne: jest.fn(),
 }));
 
+jest.mock('../src/services/financialAlert.service', () => ({
+  checkExpenseBudget: jest.fn().mockResolvedValue(null),
+}));
+
 const Transaction = require('../src/models/Transaction');
 const Wallet = require('../src/models/Wallet');
 const Category = require('../src/models/Category');
+const financialAlertService = require('../src/services/financialAlert.service');
 const ctrl = require('../src/controllers/transaction.controller');
 
 // ───────── Helpers ─────────
@@ -176,6 +181,37 @@ describe('create transaction & balance updates', () => {
       { new: true }
     );
     expect(body(res).success).toBe(true);
+  });
+
+  it('chi tiêu (expense): gọi financialAlertService.checkExpenseBudget kiểm tra ngân sách tức thì (KAN-33)', async () => {
+    const sourceWallet = makeWallet({ balance: 1000000 });
+    const category = makeCategory({ type: 'expense' });
+    Wallet.findOne.mockResolvedValue(sourceWallet);
+    Category.findOne.mockResolvedValue(category);
+    Wallet.findOneAndUpdate.mockResolvedValue({ ...sourceWallet, balance: 950000 });
+    const txDate = new Date('2026-11-08T10:00:00Z');
+    Transaction.create.mockResolvedValue(makeTransaction({ amount: 50000, type: 'expense', categoryId: CAT_EXPENSE_ID, transactionDate: txDate }));
+
+    const res = mockRes();
+    await ctrl.create(
+      mockReq({
+        body: {
+          amount: 50000,
+          type: 'expense',
+          walletId: WALLET_ID,
+          categoryId: CAT_EXPENSE_ID,
+          transactionDate: txDate,
+        },
+      }),
+      res
+    );
+
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(financialAlertService.checkExpenseBudget).toHaveBeenCalledWith(
+      USER_ID,
+      CAT_EXPENSE_ID,
+      expect.any(Date)
+    );
   });
 
   it('thu nhập (income): cộng số dư ví nguồn (+amount) thành công', async () => {

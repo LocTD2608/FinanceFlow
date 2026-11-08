@@ -1,4 +1,5 @@
 const realtimeService = require('../services/realtime.service');
+const financialAlertService = require('../services/financialAlert.service');
 const mongoose = require('mongoose');
 const Transaction = require('../models/Transaction');
 const Wallet = require('../models/Wallet');
@@ -143,6 +144,21 @@ exports.create = async (req, res) => {
       });
     } catch (e) {
       // ignore
+    }
+
+    // 8. Tự động kiểm tra ngưỡng ngân sách tức thì khi chi tiêu (KAN-33)
+    if (type === 'expense' && finalCategoryId && financialAlertService && typeof financialAlertService.checkExpenseBudget === 'function') {
+      try {
+        Promise.resolve(
+          financialAlertService.checkExpenseBudget(
+            userId,
+            finalCategoryId,
+            transaction && transaction.transactionDate ? transaction.transactionDate : new Date()
+          )
+        ).catch((err) => console.error('[financialAlert] Lỗi kiểm tra ngân sách tức thì:', err.message));
+      } catch (e) {
+        // non-blocking
+      }
     }
 
     return res.status(201).json({
