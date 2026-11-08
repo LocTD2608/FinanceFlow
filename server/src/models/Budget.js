@@ -41,6 +41,11 @@ const budgetSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    // Các mốc phần trăm đã gửi cảnh báo trong tháng: [50, 80, 100]
+    notifiedThresholds: {
+      type: [Number],
+      default: [],
+    },
   },
   {
     timestamps: true,

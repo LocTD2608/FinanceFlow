@@ -66,6 +66,16 @@ const goalSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    // Các mốc cận hạn đã nhắc nhở: ['d-7', 'd-3', 'd0']
+    notifiedStages: {
+      type: [String],
+      default: [],
+    },
+    // Tháng đã gửi nhắc nhở định kỳ theo ngày nhận lương (YYYY-MM)
+    lastSalaryReminderMonth: {
+      type: String,
+      default: null,
+    },
   },
   {
     timestamps: true,
