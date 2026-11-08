@@ -13,8 +13,10 @@ import {
   ArrowUpRight,
   X,
   BellRing,
+  AlertTriangle,
+  Target,
 } from 'lucide-react-native';
-import { useNotificationStore } from '../../store/useNotificationStore';
+import { useNotificationStore, FinancialAlertNotification } from '../../store/useNotificationStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 
 const { width } = Dimensions.get('window');
@@ -77,6 +79,88 @@ export default function BalanceToastBanner() {
   };
 
   if (!currentNotification || !toastEnabled) return null;
+
+  if (currentNotification.kind === 'financial_alert') {
+    const alert = currentNotification as FinancialAlertNotification;
+    const isDanger = alert.level === 'danger';
+    const isWarning = alert.level === 'warning';
+    const isSuccess = alert.level === 'success';
+
+    const cardStyle = isDanger
+      ? styles.toastDanger
+      : isWarning
+      ? styles.toastWarning
+      : isSuccess
+      ? styles.toastSuccess
+      : styles.toastInfo;
+
+    const badgeStyle = isDanger
+      ? styles.iconBadgeDanger
+      : isWarning
+      ? styles.iconBadgeWarning
+      : isSuccess
+      ? styles.iconBadgeSuccess
+      : styles.iconBadgeInfo;
+
+    const accentColor = isDanger
+      ? '#EF4444'
+      : isWarning
+      ? '#F59E0B'
+      : isSuccess
+      ? '#10B981'
+      : '#3B82F6';
+
+    return (
+      <Animated.View
+        style={[
+          styles.toastWrapper,
+          {
+            transform: [{ translateY }],
+            opacity,
+          },
+        ]}
+      >
+        <TouchableOpacity
+          style={[styles.toastCard, cardStyle]}
+          activeOpacity={0.9}
+          onPress={handleDismiss}
+        >
+          {/* Left Icon Badge */}
+          <View style={[styles.iconBadge, badgeStyle]}>
+            {alert.type === 'savings_reminder' ? (
+              <Target size={22} color={accentColor} />
+            ) : isDanger || isWarning ? (
+              <AlertTriangle size={22} color={accentColor} />
+            ) : (
+              <BellRing size={22} color={accentColor} />
+            )}
+          </View>
+
+          {/* Content */}
+          <View style={styles.contentCol}>
+            <View style={styles.topRow}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, flex: 1, paddingRight: 8 }}>
+                <BellRing size={12} color={accentColor} />
+                <Text style={[styles.titleText, { color: accentColor }]} numberOfLines={1}>
+                  {alert.title}
+                </Text>
+              </View>
+              <Text style={styles.timeText}>Vừa xong</Text>
+            </View>
+
+            <Text style={styles.alertBodyText} numberOfLines={3}>
+              {alert.body}
+            </Text>
+          </View>
+
+          {/* Close Button */}
+          <TouchableOpacity style={styles.closeBtn} onPress={handleDismiss} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <X size={16} color="#64748B" />
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Animated.View>
+    );
+  }
 
   const isIncome = currentNotification.direction === 'in';
   const formattedAmount = (currentNotification.amount || 0).toLocaleString('vi-VN') + ' đ';
@@ -259,5 +343,44 @@ const styles = StyleSheet.create({
     padding: 6,
     marginLeft: 8,
     alignSelf: 'flex-start',
+  },
+  toastDanger: {
+    borderColor: '#FECACA',
+    borderLeftWidth: 5,
+    borderLeftColor: '#EF4444',
+  },
+  toastWarning: {
+    borderColor: '#FEF3C7',
+    borderLeftWidth: 5,
+    borderLeftColor: '#F59E0B',
+  },
+  toastSuccess: {
+    borderColor: '#A7F3D0',
+    borderLeftWidth: 5,
+    borderLeftColor: '#10B981',
+  },
+  toastInfo: {
+    borderColor: '#BFDBFE',
+    borderLeftWidth: 5,
+    borderLeftColor: '#3B82F6',
+  },
+  iconBadgeDanger: {
+    backgroundColor: '#FEE2E2',
+  },
+  iconBadgeWarning: {
+    backgroundColor: '#FEF3C7',
+  },
+  iconBadgeSuccess: {
+    backgroundColor: '#D1FAE5',
+  },
+  iconBadgeInfo: {
+    backgroundColor: '#DBEAFE',
+  },
+  alertBodyText: {
+    fontSize: 13,
+    color: '#334155',
+    lineHeight: 18,
+    marginTop: 4,
+    fontWeight: '500',
   },
 });

@@ -17,7 +17,46 @@ export interface BalanceNotificationPayload {
   timestamp?: string;
 }
 
+export interface FinancialAlertPayload {
+  id?: string;
+  type: 'budget_alert' | 'savings_reminder';
+  level?: 'info' | 'warning' | 'danger' | 'success';
+  title: string;
+  body: string;
+  threshold?: number;
+  data?: any;
+  timestamp?: string;
+}
+
 let socket: Socket | null = null;
+
+/**
+ * Xử lý thông báo cảnh báo tài chính (ngân sách, tiết kiệm) tập trung (KAN-33)
+ */
+export const dispatchFinancialAlert = (data: FinancialAlertPayload) => {
+  const { soundEnabled, toastEnabled } = useSettingsStore.getState();
+
+  // 1. Phát âm thanh nhẹ nếu bật âm thanh
+  if (soundEnabled) {
+    soundService.playChime('in');
+  }
+
+  // 2. Đưa vào hàng đợi Toast banner nổi trên màn hình
+  if (toastEnabled) {
+    const level = data.level || (data.threshold === 100 ? 'danger' : data.threshold === 80 ? 'warning' : 'info');
+    useNotificationStore.getState().notify({
+      id: data.id || `alert_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      kind: 'financial_alert',
+      type: data.type,
+      level,
+      title: data.title,
+      body: data.body,
+      threshold: data.threshold,
+      data: data.data,
+      timestamp: data.timestamp || new Date().toISOString(),
+    });
+  }
+};
 
 /**
  * Xử lý thông báo biến động số dư tập trung:
@@ -104,6 +143,10 @@ export const initSocketConnection = (token?: string): Socket | null => {
 
   socket.on('balance:change', (payload: BalanceNotificationPayload) => {
     dispatchBalanceNotification(payload);
+  });
+
+  socket.on('financial:alert', (payload: FinancialAlertPayload) => {
+    dispatchFinancialAlert(payload);
   });
 
   socket.on('connect_error', () => {
