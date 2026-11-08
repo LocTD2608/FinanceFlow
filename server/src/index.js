@@ -91,6 +91,7 @@ const start = async () => {
   if (process.env.ENABLE_CRON !== 'false') {
     require('./jobs/netWorth.job').start();
     require('./jobs/billReminder.job').start();
+    require('./jobs/financialAlert.job').start();
   }
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 FinanceFlow Backend & WebSocket đang chạy tại http://localhost:${PORT}`);
