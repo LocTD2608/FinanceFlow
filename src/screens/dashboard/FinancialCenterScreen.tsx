@@ -42,6 +42,7 @@ import CashFlowScreen from '../cash/CashFlowScreen';
 import ExpenseAnalyticsScreen from '../analytics/ExpenseAnalyticsScreen';
 import ProfileScreen from '../profile/ProfileScreen';
 import AnimatedBottomBar from '../../components/navigation/AnimatedBottomBar';
+import AccountSetupModal from '../../components/AccountSetupModal';
 import { Alert } from 'react-native';
 
 const { width } = Dimensions.get('window');
@@ -67,10 +68,19 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [topupVisible, setTopupVisible] = useState(false);
   const [topupSuggest, setTopupSuggest] = useState(0);
+  const [showAccountSetup, setShowAccountSetup] = useState(false);
 
   const loadWallets = useCallback(async () => {
     const res = await walletApi.getWallets(token || undefined);
-    if (res?.success && Array.isArray(res.data)) setWallets(res.data);
+    if (res?.success && Array.isArray(res.data)) {
+      setWallets(res.data);
+      // Kiểm tra ví mặc định có số tài khoản chưa
+      const active = (res.data as WalletItem[]).filter((w: WalletItem) => !w.isArchived);
+      const def = active[0] || null;
+      if (def && !def.accountNumber) {
+        setShowAccountSetup(true);
+      }
+    }
   }, [token]);
 
   useEffect(() => {
@@ -668,6 +678,24 @@ export default function FinancialCenterScreen({ onLogout }: Props) {
       <AnimatedBottomBar
         activeTab={activeTab}
         onSelectTab={(tab) => setActiveTab(tab)}
+      />
+
+      {/* Dialog bắt buộc thiết lập số tài khoản ngân hàng */}
+      <AccountSetupModal
+        visible={showAccountSetup}
+        user={user}
+        wallet={defaultWallet}
+        token={token || undefined}
+        onSuccess={(updatedWallet) => {
+          setWallets((prev) =>
+            prev.map((w) =>
+              (w._id || (w as any).id) === (updatedWallet._id || (updatedWallet as any).id)
+                ? { ...w, accountNumber: updatedWallet.accountNumber }
+                : w
+            )
+          );
+          setShowAccountSetup(false);
+        }}
       />
     </View>
   );

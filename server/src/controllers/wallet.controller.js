@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const Wallet = require('../models/Wallet');
 const Transaction = require('../models/Transaction');
 const Category = require('../models/Category');
-const { generateAccountNumber } = require('../utils/accountNumber');
+const { generateAccountNumber, generatePrettyAccountNumber, isAccountNumberTaken } = require('../utils/accountNumber');
 const { validateNoteForCategory } = require('../utils/categoryRules');
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
@@ -45,16 +45,15 @@ exports.list = async (req, res) => {
     const userId = req.user.id;
     let wallets = await Wallet.find({ userId, isArchived: { $ne: true } }).sort({ createdAt: 1 });
 
-    // Nếu user chưa có ví nào, tự động tạo 1 ví tiền mặt mặc định kèm số tài khoản 10 số
+    // Nếu user chưa có ví nào, tự động tạo 1 ví tiền mặt mặc định (chưa có STK – user sẽ tự chọn sau)
     if (wallets.length === 0) {
-      const accNum = await generateAccountNumber();
       const defaultWallet = await Wallet.create({
         userId,
         name: 'Ví tiền mặt',
         type: 'cash',
         balance: 0,
         currency: 'VND',
-        accountNumber: accNum,
+        // accountNumber để null → app sẽ bắt user tự chọn qua AccountSetupModal
       });
       wallets = [defaultWallet];
     }
@@ -74,14 +73,13 @@ exports.getDefault = async (req, res) => {
     let wallet = await Wallet.findOne({ userId, isArchived: { $ne: true } }).sort({ createdAt: 1 });
 
     if (!wallet) {
-      const accNum = await generateAccountNumber();
       wallet = await Wallet.create({
         userId,
         name: 'Ví tiền mặt',
         type: 'cash',
         balance: 0,
         currency: 'VND',
-        accountNumber: accNum,
+        // accountNumber để null → app sẽ bắt user tự chọn
       });
     }
 
@@ -136,10 +134,8 @@ exports.create = async (req, res) => {
         return fail(res, 409, 'Số tài khoản đã tồn tại trên hệ thống.');
       }
       finalAccountNumber = accStr;
-    } else {
-      // Tự động cấp số tài khoản 10 số duy nhất
-      finalAccountNumber = await generateAccountNumber();
     }
+    // Không tự cấp STK ngẫu nhiên nữa – user sẽ chọn qua AccountSetupModal
 
     const wallet = await Wallet.create({
       userId,
@@ -447,6 +443,105 @@ exports.topup = async (req, res) => {
       success: true,
       message: 'Nạp tiền thành công!',
       data: { wallet: updatedWallet, transaction },
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Lỗi server: ' + error.message });
+  }
+};
+
+/**
+ * GET /api/wallets/suggest-account
+ * Trả về 1 số tài khoản "đẹp" (dễ nhớ) chưa tồn tại trong DB.
+ * Dùng cho option "Để hệ thống chọn số đẹp" trong AccountSetupModal.
+ */
+exports.suggestAccount = async (req, res) => {
+  try {
+    const pretty = await generatePrettyAccountNumber();
+    return res.json({ success: true, data: { accountNumber: pretty } });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Lỗi server: ' + error.message });
+  }
+};
+
+/**
+ * POST /api/wallets/check-account
+ * Kiểm tra số tài khoản người dùng tự nhập có bị trùng hoặc sai định dạng không.
+ * Body: { accountNumber: string }
+ */
+exports.checkAccount = async (req, res) => {
+  try {
+    const { accountNumber } = req.body || {};
+    if (!accountNumber || typeof accountNumber !== 'string') {
+      return res.status(400).json({ success: false, code: 'MISSING', message: 'Vui lòng nhập số tài khoản.' });
+    }
+    const acc = String(accountNumber).trim();
+    if (!/^\d{10}$/.test(acc)) {
+      return res.status(400).json({
+        success: false,
+        code: 'INVALID_FORMAT',
+        message: 'Số tài khoản phải gồm đúng 10 chữ số.',
+      });
+    }
+    const taken = await isAccountNumberTaken(acc);
+    if (taken) {
+      return res.status(409).json({
+        success: false,
+        code: 'TAKEN',
+        message: 'Số tài khoản này đã được sử dụng. Vui lòng chọn số khác.',
+      });
+    }
+    return res.json({ success: true, message: 'Số tài khoản hợp lệ và chưa được sử dụng.' });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Lỗi server: ' + error.message });
+  }
+};
+
+/**
+ * POST /api/wallets/:id/set-account
+ * Gán số tài khoản cho ví (chỉ dùng 1 lần – khi ví chưa có STK).
+ * Body: { accountNumber: string } – số đã được validate từ client/check-account
+ */
+exports.setAccount = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+    if (!isValidId(id)) return fail(res, 400, 'ID ví không hợp lệ.');
+
+    const wallet = await Wallet.findOne({ _id: id, userId, isArchived: { $ne: true } });
+    if (!wallet) return fail(res, 404, 'Không tìm thấy ví.');
+
+    if (wallet.accountNumber) {
+      return res.status(400).json({
+        success: false,
+        code: 'ALREADY_SET',
+        message: 'Ví này đã có số tài khoản. Không thể thay đổi.',
+      });
+    }
+
+    const { accountNumber } = req.body || {};
+    if (!accountNumber || typeof accountNumber !== 'string') {
+      return fail(res, 400, 'Vui lòng cung cấp số tài khoản.');
+    }
+    const acc = String(accountNumber).trim();
+    if (!/^\d{10}$/.test(acc)) {
+      return fail(res, 400, 'Số tài khoản phải gồm đúng 10 chữ số.');
+    }
+    const taken = await isAccountNumberTaken(acc, wallet._id);
+    if (taken) {
+      return res.status(409).json({
+        success: false,
+        code: 'TAKEN',
+        message: 'Số tài khoản này đã được sử dụng. Vui lòng chọn số khác.',
+      });
+    }
+
+    wallet.accountNumber = acc;
+    await wallet.save();
+
+    return res.json({
+      success: true,
+      message: 'Đã cài đặt số tài khoản thành công!',
+      data: wallet,
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Lỗi server: ' + error.message });

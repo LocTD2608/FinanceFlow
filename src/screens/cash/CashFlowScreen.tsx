@@ -187,16 +187,7 @@ export default function CashFlowScreen({
       });
 
       if (result.success) {
-        const actionName = mode === 'in' ? 'Thêm tiền mặt' : 'Trừ tiền mặt';
-        const amountVal =
-          mode === 'in'
-            ? `+${numericAmount.toLocaleString('vi-VN')}đ`
-            : `-${numericAmount.toLocaleString('vi-VN')}đ`;
-        Alert.alert(
-          'Thành công',
-          `${actionName} thành công: ${amountVal}\nGhi chú: ${currentNote.trim()}`,
-          [{ text: 'OK', onPress: onBack }]
-        );
+        onBack();
       } else {
         Alert.alert('Thông báo', result.message || 'Không thể ghi nhận giao dịch.');
       }

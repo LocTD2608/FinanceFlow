@@ -306,4 +306,50 @@ export const walletApi = {
   },
 
   insufficient,
+
+  /** Lấy 1 số tài khoản "đẹp" (dễ nhớ) từ server để gợi ý cho user. */
+  async suggestAccount(token?: string): Promise<ApiResult<{ accountNumber: string }>> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/suggest-account`, {
+        headers: { Authorization: `Bearer ${token || ''}` },
+      });
+      return await res.json();
+    } catch {
+      return { success: false, message: 'Không thể kết nối server.' };
+    }
+  },
+
+  /** Kiểm tra số tài khoản người dùng tự nhập có hợp lệ và chưa bị trùng không. */
+  async checkAccount(token?: string, accountNumber?: string): Promise<ApiResult> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/check-account`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token || ''}`,
+        },
+        body: JSON.stringify({ accountNumber }),
+      });
+      return await res.json();
+    } catch {
+      return { success: false, message: 'Không thể kết nối server.' };
+    }
+  },
+
+  /** Gán số tài khoản cho ví (chỉ dùng 1 lần – khi ví chưa có STK). */
+  async setAccount(token?: string, walletId?: string, accountNumber?: string): Promise<ApiResult<WalletItem>> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/${walletId}/set-account`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token || ''}`,
+        },
+        body: JSON.stringify({ accountNumber }),
+      });
+      return await res.json();
+    } catch {
+      return { success: false, message: 'Không thể kết nối server.' };
+    }
+  },
 };
