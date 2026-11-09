@@ -52,8 +52,9 @@ describe('Wallet Controller - Account Number & CRUD', () => {
 
     expect(res.status).toHaveBeenCalledWith(201);
     const createdCall = Wallet.create.mock.calls[0][0];
-    // Không tự sinh STK — để null, user sẽ chọn qua AccountSetupModal
-    expect(createdCall.accountNumber).toBeNull();
+    // Không tự sinh STK — field accountNumber không được truyền vào (undefined)
+    // để tránh lưu null vào MongoDB unique partial index
+    expect(createdCall.accountNumber).toBeUndefined();
   });
 
   test('Tạo ví truyền STK không đúng 10 chữ số -> 400', async () => {

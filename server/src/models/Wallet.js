@@ -30,7 +30,8 @@ const walletSchema = new mongoose.Schema(
     accountNumber: {
       type: String,
       trim: true,
-      default: null,
+      // Không set default null — để field vắng mặt hoàn toàn khi chưa thiết lập STK
+      // (sparse index chỉ skip field bị missing, không skip null)
     },
     bankName: {
       type: String,
@@ -60,6 +61,10 @@ const walletSchema = new mongoose.Schema(
 
 // Indexes
 walletSchema.index({ userId: 1, isArchived: 1 });
-walletSchema.index({ accountNumber: 1 }, { unique: true, sparse: true });
+// Chỉ enforce unique khi accountNumber là string thật (bỏ qua null/undefined)
+walletSchema.index(
+  { accountNumber: 1 },
+  { unique: true, partialFilterExpression: { accountNumber: { $type: 'string' } } }
+);
 
 module.exports = mongoose.model('Wallet', walletSchema);

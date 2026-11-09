@@ -143,7 +143,8 @@ exports.create = async (req, res) => {
       type: walletType,
       balance: initialBalance,
       currency: finalCurrency,
-      accountNumber: finalAccountNumber,
+      // Chỉ gán accountNumber khi thực sự có giá trị – tránh lưu null vào index unique
+      ...(finalAccountNumber ? { accountNumber: finalAccountNumber } : {}),
       bankName: bankName ? String(bankName).trim() : null,
     });
 
@@ -258,7 +259,8 @@ exports.update = async (req, res) => {
 
     if (body.accountNumber !== undefined) {
       if (body.accountNumber === null || String(body.accountNumber).trim() === '') {
-        updates.accountNumber = null;
+        // Xóa field accountNumber hoàn toàn thay vì gán null – tránh vi phạm partial unique index
+        updates.$unset = { accountNumber: '' };
       } else {
         const accStr = String(body.accountNumber).trim();
         if (!/^\d{10}$/.test(accStr)) {
