@@ -16,6 +16,8 @@ import SuccessScreen from './src/screens/auth/SuccessScreen';
 import FinancialCenterScreen from './src/screens/dashboard/FinancialCenterScreen';
 import AdminPortalScreen from './src/screens/admin/AdminPortalScreen';
 import BalanceToastBanner from './src/components/notification/BalanceToastBanner';
+import GoalOverdueDecisionModal from './src/components/GoalOverdueDecisionModal';
+import { goalApi, PendingDecisionGoal } from './src/api/goal';
 import { registerForPushNotifications } from './src/utils/pushNotifications';
 
 type ScreenType = 'welcome' | 'login' | 'register' | 'success' | 'home';
@@ -24,6 +26,24 @@ export default function App() {
   const [currentScreen, setCurrentScreen] = useState<ScreenType>('welcome');
   const [successUsername, setSuccessUsername] = useState<string>('');
   const { isLoading, loadSession, token, user, activeMode, logout } = useAuthStore();
+  const [pendingGoals, setPendingGoals] = useState<PendingDecisionGoal[]>([]);
+
+  useEffect(() => {
+    if (!token || !user || user.role === 'admin') {
+      setPendingGoals([]);
+      return;
+    }
+    let cancelled = false;
+    goalApi
+      .getPendingDecisions(token)
+      .then((list) => {
+        if (!cancelled) setPendingGoals(list);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [token, user]);
   const { loadSettings } = useSettingsStore();
 
   useEffect(() => {
@@ -143,6 +163,14 @@ export default function App() {
       )}
 
       {/* Floating Realtime Balance Notification Banner ("Ting Ting") - Đặt ở cuối cùng để nổi trên tất cả màn hình */}
+      <GoalOverdueDecisionModal
+        visible={pendingGoals.length > 0 && !!token && user?.role !== 'admin'}
+        goal={pendingGoals[0] || null}
+        token={token}
+        onResolved={(resolvedId) =>
+          setPendingGoals((prev) => prev.filter((g) => g._id !== resolvedId))
+        }
+      />
       <BalanceToastBanner />
     </SafeAreaProvider>
   );

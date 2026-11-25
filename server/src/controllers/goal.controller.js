@@ -8,6 +8,7 @@ const { runInTransaction } = require('../utils/dbTransaction');
 const { insufficientBody } = require('../utils/walletBalance');
 const pushService = require('../services/push.service');
 const realtimeService = require('../services/realtime.service');
+const goalLifecycleService = require('../services/goalLifecycle.service');
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 const fail = (res, status, message, extra = {}) =>
@@ -79,7 +80,219 @@ async function notifyGoalCompleted(userId, result, fallbackWalletId) {
 }
 
 /**
- * GET /api/goals?status=active|completed|cancelled
+ * GET /api/goals/pending-decision
+ * Lấy danh sách mục tiêu đã hết hạn sau 24h cần người dùng chọn Gia hạn hoặc Dừng (KAN-70)
+ */
+exports.getPendingDecision = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const now = new Date();
+    await goalLifecycleService.promoteExpiredGraceGoalsForUser(userId, now);
+
+    const goals = await Goal.find({
+      userId,
+      status: 'active',
+      overdueStage: 'decision_required',
+    })
+      .populate('targetWalletId', 'name type currency')
+      .sort({ decisionRequiredAt: 1, deadline: 1 })
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      data: goals,
+    });
+  } catch (error) {
+    return fail(res, 500, 'Lỗi server: ' + error.message);
+  }
+};
+
+/**
+ * POST /api/goals/:id/extend
+ * Gia hạn mục tiêu quá hạn sang ngày mới (KAN-70)
+ */
+exports.extend = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+    const { newDeadline } = req.body || {};
+
+    if (!isValidId(id)) return fail(res, 400, 'ID mục tiêu không hợp lệ.');
+    if (!newDeadline) return fail(res, 400, 'Vui lòng chọn ngày gia hạn mới.');
+
+    const parsedDeadline = new Date(newDeadline);
+    if (Number.isNaN(parsedDeadline.getTime()) || parsedDeadline <= new Date()) {
+      return fail(res, 400, 'Ngày gia hạn mới phải lớn hơn thời điểm hiện tại.');
+    }
+
+    const goal = await Goal.findOne({ _id: id, userId });
+    if (!goal) return fail(res, 404, 'Không tìm thấy mục tiêu.');
+    if (goal.status !== 'active') {
+      return fail(res, 400, 'Chỉ có thể gia hạn mục tiêu đang hoạt động.');
+    }
+
+    goal.deadline = parsedDeadline;
+    goal.overdueStage = 'none';
+    goal.overdueNotifiedAt = null;
+    goal.decisionRequiredAt = null;
+    goal.notifiedStages = [];
+    goal.extensionCount = (goal.extensionCount || 0) + 1;
+    await goal.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Đã gia hạn mục tiêu thành công!',
+      data: goal,
+    });
+  } catch (error) {
+    return fail(res, 500, 'Lỗi server: ' + error.message);
+  }
+};
+
+/**
+ * POST /api/goals/:id/expire-close
+ * Dừng gia hạn -> Hoàn 100% tiền (0% phí phạt) về ví chính và đóng mục tiêu thành expired (KAN-70)
+ */
+exports.expireClose = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+    if (!isValidId(id)) return fail(res, 400, 'ID mục tiêu không hợp lệ.');
+
+    const result = await runInTransaction(async (session) => {
+      const goal = await Goal.findOne({ _id: id, userId }).session(session);
+      if (!goal) {
+        const err = new Error('Không tìm thấy mục tiêu.');
+        err.status = 404;
+        throw err;
+      }
+      if (goal.status !== 'active') {
+        const err = new Error('Chỉ có thể đóng mục tiêu đang hoạt động.');
+        err.status = 400;
+        throw err;
+      }
+
+      const refundAmount = goal.currentAmount || 0;
+      let targetWallet = null;
+
+      if (refundAmount > 0) {
+        if (goal.targetWalletId) {
+          targetWallet = await Wallet.findOne({
+            _id: goal.targetWalletId,
+            userId,
+            isArchived: false,
+          }).session(session);
+        }
+        if (!targetWallet) {
+          targetWallet = await Wallet.findOne({
+            userId,
+            isArchived: false,
+            type: 'cash',
+          }).session(session);
+        }
+        if (!targetWallet) {
+          targetWallet = await Wallet.findOne({
+            userId,
+            isArchived: false,
+          }).session(session);
+        }
+        if (!targetWallet) {
+          const err = new Error('Không tìm thấy ví chính khả dụng để hoàn tiền.');
+          err.status = 400;
+          throw err;
+        }
+
+        targetWallet = await Wallet.findByIdAndUpdate(
+          targetWallet._id,
+          { $inc: { balance: refundAmount } },
+          { session, new: true }
+        );
+
+        let incomeCat = await Category.findOne({
+          type: 'income',
+          isDefault: true,
+        }).session(session);
+        if (!incomeCat) {
+          const created = await Category.create(
+            [{ name: 'Khác (Thu)', type: 'income', isDefault: true }],
+            { session }
+          );
+          incomeCat = created[0];
+        }
+
+        await Transaction.create(
+          [
+            {
+              userId,
+              walletId: targetWallet._id,
+              categoryId: incomeCat._id,
+              type: 'income',
+              amount: refundAmount,
+              date: new Date(),
+              goalId: goal._id,
+              note: `Hoàn 100% tiền mục tiêu hết hạn "${goal.name}"`,
+            },
+          ],
+          { session }
+        );
+      }
+
+      goal.status = 'expired';
+      goal.expiredAt = new Date();
+      goal.overdueStage = 'none';
+      goal.penaltyFee = 0;
+      goal.refundAmount = refundAmount;
+      await goal.save({ session });
+
+      return {
+        goal,
+        refundAmount,
+        penaltyFee: 0,
+        refundWallet: targetWallet
+          ? { _id: targetWallet._id, name: targetWallet.name, balance: targetWallet.balance }
+          : null,
+      };
+    });
+
+    if (result.refundAmount > 0 && result.refundWallet) {
+      realtimeService.emitBalanceChange(String(userId), {
+        type: 'income',
+        direction: 'in',
+        amount: result.refundAmount,
+        walletId: String(result.refundWallet._id),
+        walletName: result.refundWallet.name,
+        newBalance: result.refundWallet.balance,
+        note: `Hoàn 100% tiền mục tiêu hết hạn "${result.goal.name}"`,
+      });
+
+      try {
+        await pushService.sendToUser(String(userId), {
+          title: 'Đã hoàn 100% tiền mục tiêu hết hạn',
+          body: `Mục tiêu "${result.goal.name}" đã đóng và hoàn ${result.refundAmount.toLocaleString('vi-VN')} đ về ${result.refundWallet.name}.`,
+          data: {
+            type: 'goal_expired',
+            goalId: String(result.goal._id),
+            refundAmount: result.refundAmount,
+          },
+        });
+      } catch (pushErr) {
+        console.error('[goal] Gửi push notification expireClose lỗi:', pushErr.message);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Đã đóng mục tiêu hết hạn và hoàn 100% tiền về ví chính.',
+      data: result,
+    });
+  } catch (error) {
+    if (error.status) return fail(res, error.status, error.message);
+    return fail(res, 500, 'Lỗi server: ' + error.message);
+  }
+};
+
+/**
+ * GET /api/goals?status=active|completed|cancelled|expired
  * Danh sách mục tiêu của người dùng
  */
 exports.list = async (req, res) => {
@@ -88,7 +301,7 @@ exports.list = async (req, res) => {
     const { status } = req.query;
 
     const filter = { userId };
-    if (status && ['active', 'completed', 'cancelled'].includes(status)) {
+    if (status && ['active', 'completed', 'cancelled', 'expired'].includes(status)) {
       filter.status = status;
     }
 
