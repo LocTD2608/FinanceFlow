@@ -39,7 +39,7 @@ const goalSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['active', 'completed', 'cancelled'],
+      enum: ['active', 'completed', 'cancelled', 'expired'],
       default: 'active',
     },
     // Ví thụ hưởng tiền hoàn lại khi hoàn thành hoặc hủy mục tiêu
@@ -76,6 +76,28 @@ const goalSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // Trạng thái xử lý quá hạn (KAN-69 / KAN-70)
+    overdueStage: {
+      type: String,
+      enum: ['none', 'grace_24h', 'decision_required'],
+      default: 'none',
+    },
+    overdueNotifiedAt: {
+      type: Date,
+      default: null,
+    },
+    decisionRequiredAt: {
+      type: Date,
+      default: null,
+    },
+    expiredAt: {
+      type: Date,
+      default: null,
+    },
+    extensionCount: {
+      type: Number,
+      default: 0,
+    },
   },
   {
     timestamps: true,
@@ -84,5 +106,6 @@ const goalSchema = new mongoose.Schema(
 );
 
 goalSchema.index({ userId: 1, status: 1, createdAt: -1 });
+goalSchema.index({ status: 1, deadline: 1, overdueStage: 1 });
 
 module.exports = mongoose.model('Goal', goalSchema);
