@@ -11,9 +11,10 @@ router.use(auth);
 router.use(async (req, res, next) => {
   try {
     if (!objectId(req.user.id)) throw new ChatError(401, 'UNAUTHORIZED', 'Phiên đăng nhập không hợp lệ.');
-    const user = await User.findById(req.user.id).select('status');
+    const user = await User.findById(req.user.id).select('status role');
     if (!user) throw new ChatError(401, 'UNAUTHORIZED', 'Tài khoản không còn tồn tại.');
     if (user.status === 'locked') throw new ChatError(403, 'ACCOUNT_LOCKED', 'Tài khoản đã bị khóa.');
+    if (user.role && user.role !== 'user') throw new ChatError(403, 'FORBIDDEN', 'Chatbot chỉ dành cho người dùng cá nhân.');
     next();
   } catch (err) {
     next(err instanceof ChatError ? err : new ChatError(503, 'AUTH_UNAVAILABLE', 'Không thể kiểm tra tài khoản lúc này.'));

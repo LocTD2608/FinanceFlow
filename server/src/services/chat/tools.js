@@ -84,11 +84,14 @@ async function financialSummary(userId, args) {
   } };
 }
 
+const { getGoalSummary } = require('./goalTool');
+
 async function executeTool(userId, name, args) {
   if (name === 'draft_transaction') return { draft: await validateDraft(userId, 'create_transaction', args) };
   if (name === 'draft_budget') return { draft: await validateDraft(userId, 'create_budget', args) };
   if (name === 'financial_summary') return financialSummary(userId, args);
   fields(args, []);
+  if (name === 'goal_summary') return getGoalSummary(userId);
   if (name === 'app_guide') return { facts: { guide: GUIDE } };
   if (name === 'list_choices') return { facts: {
     wallets: bounded(await read(Wallet.find({ userId, isArchived: false, currency: 'VND' }).select('_id name').limit(101))),
@@ -103,6 +106,7 @@ const declarations = [
   { name: 'list_choices', description: 'Lấy ID và tên ví, danh mục hợp lệ; hỏi người dùng chọn nếu chưa rõ.' },
   { name: 'financial_summary', description: 'Số liệu thực tế theo kỳ để trả lời và gợi ý chi tiêu. Ngân sách kèm chi theo tháng lịch.',
     parameters: { type: 'OBJECT', properties: { period: { type: 'STRING', enum: ['day', 'week', 'month', 'year'] }, date: { ...string, description: 'YYYY-MM-DD, ngày thuộc kỳ cần xem, UTC+7' } } } },
+  { name: 'goal_summary', description: 'Lấy danh sách mục tiêu tiết kiệm của người dùng (tiến độ, hạn chót, trạng thái quá hạn).' },
   { name: 'draft_transaction', description: 'Đề xuất bản nháp thu/chi, KHÔNG lưu giao dịch. Chỉ chọn ID khi ý định người dùng rõ ràng.',
     parameters: { type: 'OBJECT', required: ['type', 'amount', 'walletId', 'categoryId'], properties: {
       type: { type: 'STRING', enum: ['income', 'expense'] }, amount: { type: 'NUMBER' }, walletId: string, categoryId: string, date: string, note: string } } },

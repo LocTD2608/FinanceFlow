@@ -48,7 +48,15 @@ async function request<T>(token: string, path: string, body?: object): Promise<T
   } finally { clearTimeout(timeout); }
 }
 export const chatApi = {
-  sendMessage: (token: string, input: { message: string; conversationId?: string }) => request<ChatReply>(token, '/messages', input),
+  sendMessage: (
+    token: string,
+    input: {
+      message: string;
+      conversationId?: string;
+      imageBase64?: string;
+      imageMimeType?: 'image/jpeg' | 'image/png' | 'image/webp';
+    }
+  ) => request<ChatReply>(token, '/messages', input),
   getConversation: (token: string, id: string) => request<ChatConversation>(token, `/conversations/${encodeURIComponent(id)}`),
   // Call only from an explicit confirmation button. On uncertain network results,
   // retry this SAME action ID; never create a replacement transaction automatically.

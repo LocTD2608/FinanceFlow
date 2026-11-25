@@ -60,3 +60,22 @@ exports.emitFinancialAlert = (userId, alert = {}) => {
     console.error('Lỗi khi phát sự kiện financial:alert:', err.message);
   }
 };
+
+/**
+ * Phát sự kiện AG-UI Mức 1 (Streaming trạng thái agent, tool calls, state delta) tới user qua Socket.io (KAN-34)
+ */
+exports.emitAguiEvent = (userId, event = {}) => {
+  try {
+    const io = socket.getIO();
+    if (!io) return;
+
+    const payload = {
+      ...event,
+      timestamp: event.timestamp || new Date().toISOString(),
+    };
+
+    io.to(`user_${userId}`).emit('agui:event', payload);
+  } catch (err) {
+    console.error('Lỗi khi phát sự kiện agui:event:', err.message);
+  }
+};

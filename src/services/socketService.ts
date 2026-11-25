@@ -28,6 +28,36 @@ export interface FinancialAlertPayload {
   timestamp?: string;
 }
 
+export interface AguiEventPayload {
+  type:
+    | 'RUN_STARTED'
+    | 'STEP_STARTED'
+    | 'STEP_FINISHED'
+    | 'TOOL_CALL_START'
+    | 'TOOL_CALL_RESULT'
+    | 'TEXT_MESSAGE_CONTENT'
+    | 'STATE_DELTA'
+    | 'RUN_FINISHED'
+    | 'RUN_ERROR';
+  runId: string;
+  threadId?: string;
+  stepName?: string;
+  toolName?: string;
+  delta?: Record<string, any>;
+  content?: string;
+  message?: string;
+  timestamp?: string;
+}
+
+const aguiListeners = new Set<(event: AguiEventPayload) => void>();
+
+export const subscribeAguiEvents = (listener: (event: AguiEventPayload) => void) => {
+  aguiListeners.add(listener);
+  return () => {
+    aguiListeners.delete(listener);
+  };
+};
+
 let socket: Socket | null = null;
 
 /**
@@ -147,6 +177,16 @@ export const initSocketConnection = (token?: string): Socket | null => {
 
   socket.on('financial:alert', (payload: FinancialAlertPayload) => {
     dispatchFinancialAlert(payload);
+  });
+
+  socket.on('agui:event', (payload: AguiEventPayload) => {
+    aguiListeners.forEach((listener) => {
+      try {
+        listener(payload);
+      } catch {
+        // ignore listener error
+      }
+    });
   });
 
   socket.on('connect_error', () => {

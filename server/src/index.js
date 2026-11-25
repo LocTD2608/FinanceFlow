@@ -27,7 +27,8 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 app.use(cors());
-app.use(express.json());
+const jsonParser = express.json();
+app.use((req, res, next) => (req.path.startsWith('/api/chat') ? next() : jsonParser(req, res, next)));
 
 // ──────────────────────────────────────────────
 // Routes
@@ -73,7 +74,7 @@ app.use('/api/reports', reportRoutes);
 
 // 12. Quản lý mục tiêu tài chính (Tiết kiệm)
 app.use('/api/goals', goalRoutes);
-app.use('/api/chat', chatRoutes);
+app.use('/api/chat', express.json({ limit: '8mb' }), chatRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
