@@ -6,11 +6,77 @@ const Transaction = require('../models/Transaction');
 const Category = require('../models/Category');
 const { runInTransaction } = require('../utils/dbTransaction');
 const { insufficientBody } = require('../utils/walletBalance');
+const pushService = require('../services/push.service');
+const realtimeService = require('../services/realtime.service');
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 const fail = (res, status, message, extra = {}) =>
   res.status(status).json({ success: false, message, ...extra });
 const round2 = (n) => Math.round(n * 100) / 100;
+
+/**
+ * Phát Push Notification và Realtime Socket chúc mừng khi mục tiêu đạt 100% (KAN-71).
+ * Lỗi gửi thông báo không làm fail giao dịch đã commit.
+ */
+async function notifyGoalCompleted(userId, result, fallbackWalletId) {
+  const goal = result?.goal;
+  if (!goal) return;
+
+  const refundWalletId = goal.targetWalletId || fallbackWalletId || null;
+  let refundWallet = null;
+  if (refundWalletId) {
+    try {
+      refundWallet = await Wallet.findById(refundWalletId).select('name balance').lean();
+    } catch {
+      refundWallet = null;
+    }
+  }
+
+  const refundAmount = Number(goal.refundAmount || goal.currentAmount || 0);
+  const walletName = refundWallet?.name || 'Ví chính';
+  const title = 'Chúc mừng hoàn thành mục tiêu! 🎉';
+  const body = `Mục tiêu "${goal.name}" đã đạt 100% (${refundAmount.toLocaleString('vi-VN')} đ) và đã hoàn tiền 100% về ${walletName}.`;
+
+  try {
+    await pushService.sendToUser(String(userId), {
+      title,
+      body,
+      data: {
+        type: 'goal_completed',
+        goalId: String(goal._id),
+        goalName: goal.name,
+        refundAmount,
+        walletId: refundWalletId ? String(refundWalletId) : '',
+      },
+    });
+  } catch (pushErr) {
+    console.error('[goal] Gửi push notification hoàn thành lỗi:', pushErr.message);
+  }
+
+  realtimeService.emitBalanceChange(String(userId), {
+    type: 'income',
+    direction: 'in',
+    amount: refundAmount,
+    walletId: refundWalletId ? String(refundWalletId) : '',
+    walletName,
+    newBalance: refundWallet?.balance ?? 0,
+    note: `Hoàn thành 100% mục tiêu "${goal.name}"`,
+  });
+
+  realtimeService.emitFinancialAlert(String(userId), {
+    type: 'goal_completed',
+    level: 'success',
+    title,
+    body,
+    data: {
+      goalId: String(goal._id),
+      goalName: goal.name,
+      status: 'completed',
+      refundAmount,
+      walletId: refundWalletId ? String(refundWalletId) : '',
+    },
+  });
+}
 
 /**
  * GET /api/goals?status=active|completed|cancelled
@@ -392,6 +458,10 @@ exports.contribute = async (req, res) => {
         completed: isCompleted,
       };
     });
+
+    if (result.completed) {
+      await notifyGoalCompleted(userId, result, walletId);
+    }
 
     const msg = result.completed
       ? 'Chúc mừng! Bạn đã hoàn thành mục tiêu. Tiền đã được hoàn trả 100% về ví của bạn.'

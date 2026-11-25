@@ -19,7 +19,7 @@ export interface BalanceNotificationPayload {
 
 export interface FinancialAlertPayload {
   id?: string;
-  type: 'budget_alert' | 'savings_reminder';
+  type: 'budget_alert' | 'savings_reminder' | 'goal_completed' | 'goal_overdue' | 'goal_expired';
   level?: 'info' | 'warning' | 'danger' | 'success';
   title: string;
   body: string;
